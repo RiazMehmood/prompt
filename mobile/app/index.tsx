@@ -2,6 +2,7 @@ import { View, Text, StyleSheet } from "react-native";
 import { useAuthStore } from "shared/stores/authStore";
 import { useRouter } from "expo-router";
 import { useEffect } from "react";
+import { ChatInterface } from "@/components/chat/ChatInterface";
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -19,32 +20,15 @@ export default function HomeScreen() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Welcome to Your Dashboard</Text>
-      <Text style={styles.subtitle}>
-        Start by asking a legal question or generating a document
-      </Text>
+      <View style={styles.header}>
+        <Text style={styles.title}>Legal Assistant</Text>
+        <Text style={styles.subtitle}>
+          Ask questions about Pakistani law
+        </Text>
+      </View>
 
-      <View style={styles.grid}>
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Chat with AI</Text>
-          <Text style={styles.cardText}>
-            Ask legal questions and get AI-powered answers with citations
-          </Text>
-        </View>
-
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Generate Documents</Text>
-          <Text style={styles.cardText}>
-            Create bail applications and other legal documents
-          </Text>
-        </View>
-
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Document Library</Text>
-          <Text style={styles.cardText}>
-            Access your generated documents and legal resources
-          </Text>
-        </View>
+      <View style={styles.chatContainer}>
+        <ChatInterface />
       </View>
     </View>
   );
@@ -53,35 +37,23 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 24,
     backgroundColor: "#fff",
   },
+  header: {
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "#ddd",
+  },
   title: {
-    fontSize: 28,
+    fontSize: 24,
     fontWeight: "bold",
-    marginBottom: 8,
+    marginBottom: 4,
   },
   subtitle: {
-    fontSize: 16,
-    color: "#666",
-    marginBottom: 24,
-  },
-  grid: {
-    gap: 16,
-  },
-  card: {
-    borderWidth: 1,
-    borderColor: "#ddd",
-    borderRadius: 8,
-    padding: 16,
-  },
-  cardTitle: {
-    fontSize: 18,
-    fontWeight: "600",
-    marginBottom: 8,
-  },
-  cardText: {
     fontSize: 14,
     color: "#666",
+  },
+  chatContainer: {
+    flex: 1,
   },
 });
