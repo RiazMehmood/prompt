@@ -1,0 +1,40 @@
+# Backend Dependencies for Checkpoint 1 - Free MVP
+# Stack: Vercel Serverless + Supabase Free + Gemini Flash Free
+
+# FastAPI Framework
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+python-multipart==0.0.6
+
+# LangChain for AI workflows
+langchain==0.1.0
+langchain-google-genai==0.0.6
+
+# Supabase Client
+supabase==2.3.0
+postgrest==0.13.0
+
+# Authentication
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+google-auth==2.27.0
+google-auth-oauthlib==1.2.0
+
+# HTTP Client
+httpx==0.26.0
+
+# Document Generation
+python-docx==1.1.0
+
+# Pydantic for validation
+pydantic==2.5.3
+pydantic-settings==2.1.0
+
+# Environment variables
+python-dotenv==1.0.0
+
+# Redis client for Upstash
+redis==5.0.1
+
+# Utilities
+python-dateutil==2.8.2

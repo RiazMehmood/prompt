@@ -1,0 +1,489 @@
+openapi: 3.1.0
+info:
+  title: RAG Query and Chat API
+  version: 1.0.0
+
+paths:
+  /chat/sessions:
+    get:
+      summary: List user's chat sessions
+      tags: [RAG]
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: List of chat sessions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sessions:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        session_id:
+                          type: string
+                          format: uuid
+                        title:
+                          type: string
+                          description: Auto-generated from first message
+                        last_message:
+                          type: string
+                        created_at:
+                          type: string
+                          format: date-time
+                        last_active:
+                          type: string
+                          format: date-time
+                        message_count:
+                          type: integer
+                  total:
+                    type: integer
+
+    post:
+      summary: Create new chat session
+      tags: [RAG]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                  description: Optional custom title
+      responses:
+        '201':
+          description: Chat session created
+          content:
+            application/json:
+              schema:
+                $ref: './openapi.yaml#/components/schemas/ChatSession'
+        '402':
+          description: Query limit reached for subscription tier
+        '403':
+          description: Subscription expired or blocked
+
+  /chat/sessions/{session_id}:
+    get:
+      summary: Get chat session with full message history
+      tags: [RAG]
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Chat session details
+          content:
+            application/json:
+              schema:
+                $ref: './openapi.yaml#/components/schemas/ChatSession'
+        '404':
+          description: Session not found
+
+    delete:
+      summary: Delete chat session
+      tags: [RAG]
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Session deleted
+        '404':
+          description: Session not found
+
+  /chat/sessions/{session_id}/messages:
+    post:
+      summary: Send message in chat session
+      tags: [RAG]
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - content
+              properties:
+                content:
+                  type: string
+                  minLength: 1
+                  maxLength: 4000
+                context_documents:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+                  description: Optional specific documents to query
+      responses:
+        '200':
+          description: Message sent and response generated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user_message:
+                    $ref: './openapi.yaml#/components/schemas/ChatMessage'
+                  assistant_message:
+                    $ref: './openapi.yaml#/components/schemas/ChatMessage'
+                  sources:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        document_id:
+                          type: string
+                          format: uuid
+                        title:
+                          type: string
+                        excerpt:
+                          type: string
+                        relevance_score:
+                          type: number
+                          format: float
+                  cached:
+                    type: boolean
+                    description: Whether response was served from cache
+        '400':
+          description: Invalid message or empty content
+        '402':
+          description: Query limit reached
+        '403':
+          description: Subscription expired or blocked
+        '404':
+          description: Session not found
+        '429':
+          description: Rate limit exceeded
+
+  /chat/sessions/{session_id}/messages/{message_index}/feedback:
+    post:
+      summary: Provide feedback on assistant message
+      tags: [RAG]
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: message_index
+          in: path
+          required: true
+          schema:
+            type: integer
+            description: Index of message in session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - rating
+              properties:
+                rating:
+                  type: string
+                  enum: [helpful, not_helpful, incorrect]
+                comment:
+                  type: string
+                  maxLength: 500
+      responses:
+        '200':
+          description: Feedback recorded
+        '404':
+          description: Session or message not found
+
+  /rag/query:
+    post:
+      summary: One-off RAG query (no session)
+      tags: [RAG]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - query
+              properties:
+                query:
+                  type: string
+                  minLength: 1
+                  maxLength: 4000
+                category:
+                  type: string
+                  description: Filter by document category
+                top_k:
+                  type: integer
+                  default: 5
+                  minimum: 1
+                  maximum: 20
+      responses:
+        '200':
+          description: Query response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  answer:
+                    type: string
+                  confidence_score:
+                    type: number
+                    format: float
+                    minimum: 0
+                    maximum: 1
+                  sources:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        document_id:
+                          type: string
+                          format: uuid
+                        title:
+                          type: string
+                        excerpt:
+                          type: string
+                        relevance_score:
+                          type: number
+                          format: float
+                  cached:
+                    type: boolean
+                  ai_model_used:
+                    type: string
+        '400':
+          description: Invalid query
+        '402':
+          description: Query limit reached
+        '403':
+          description: Subscription expired or blocked
+        '429':
+          description: Rate limit exceeded
+
+  /rag/search:
+    post:
+      summary: Search knowledge base documents
+      tags: [RAG]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - query
+              properties:
+                query:
+                  type: string
+                category:
+                  type: string
+                limit:
+                  type: integer
+                  default: 10
+                  maximum: 50
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        document_id:
+                          type: string
+                          format: uuid
+                        title:
+                          type: string
+                        category:
+                          type: string
+                        excerpt:
+                          type: string
+                        relevance_score:
+                          type: number
+                          format: float
+                  total:
+                    type: integer
+
+  /rag/analyze:
+    post:
+      summary: Analyze document or case (advanced workflow)
+      tags: [RAG]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - analysis_type
+                - input
+              properties:
+                analysis_type:
+                  type: string
+                  enum: [legal_case, medical_diagnosis, lesson_plan, engineering_review]
+                input:
+                  type: object
+                  additionalProperties: true
+                  description: Type-specific input fields
+      responses:
+        '200':
+          description: Analysis completed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  analysis_id:
+                    type: string
+                    format: uuid
+                  results:
+                    type: object
+                    additionalProperties: true
+                  sources:
+                    type: array
+                    items:
+                      type: object
+                  confidence_score:
+                    type: number
+                    format: float
+                  warnings:
+                    type: array
+                    items:
+                      type: string
+        '400':
+          description: Invalid analysis type or input
+        '402':
+          description: Feature not available in current tier
+        '403':
+          description: Subscription expired or blocked
+
+  /rag/cache/stats:
+    get:
+      summary: Get cache statistics (admin/debug)
+      tags: [RAG, Admin]
+      responses:
+        '200':
+          description: Cache statistics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total_queries:
+                    type: integer
+                  cache_hits:
+                    type: integer
+                  cache_misses:
+                    type: integer
+                  hit_rate:
+                    type: number
+                    format: float
+                  avg_response_time_cached:
+                    type: number
+                    description: Milliseconds
+                  avg_response_time_uncached:
+                    type: number
+                    description: Milliseconds
+        '403':
+          description: Admin access required
+
+  /admin/rag/knowledge-base:
+    get:
+      summary: Get knowledge base statistics (admin)
+      tags: [RAG, Admin]
+      responses:
+        '200':
+          description: Knowledge base statistics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total_documents:
+                    type: integer
+                  documents_by_category:
+                    type: object
+                    additionalProperties:
+                      type: integer
+                  total_embeddings:
+                    type: integer
+                  storage_used_mb:
+                    type: number
+                    format: decimal
+                  last_updated:
+                    type: string
+                    format: date-time
+        '403':
+          description: Admin access required
+
+  /admin/rag/reindex:
+    post:
+      summary: Trigger knowledge base reindexing (admin)
+      tags: [RAG, Admin]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                category:
+                  type: string
+                  description: Reindex specific category only
+                force:
+                  type: boolean
+                  default: false
+      responses:
+        '202':
+          description: Reindexing started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job_id:
+                    type: string
+                    format: uuid
+                  estimated_time:
+                    type: integer
+                    description: Estimated completion time in seconds
+        '403':
+          description: Admin access required
+        '409':
+          description: Reindexing already in progress

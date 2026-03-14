@@ -1,0 +1,564 @@
+openapi: 3.1.0
+info:
+  title: Document Management API
+  version: 1.0.0
+
+paths:
+  /documents/templates:
+    get:
+      summary: Get available document templates for user's role
+      tags: [Documents]
+      responses:
+        '200':
+          description: List of document templates
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    template_id:
+                      type: string
+                      format: uuid
+                    name:
+                      type: string
+                    category:
+                      type: string
+                    description:
+                      type: string
+                    required_fields:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          field_name:
+                            type: string
+                          field_type:
+                            type: string
+                            enum: [text, number, date, boolean, select]
+                          required:
+                            type: boolean
+                          options:
+                            type: array
+                            items:
+                              type: string
+                    sample_url:
+                      type: string
+                      nullable: true
+
+  /documents/generate:
+    post:
+      summary: Generate document from template
+      tags: [Documents]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - template_id
+                - fields
+              properties:
+                template_id:
+                  type: string
+                  format: uuid
+                fields:
+                  type: object
+                  additionalProperties: true
+                  description: Key-value pairs for template fields
+      responses:
+        '201':
+          description: Document generation started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  document_id:
+                    type: string
+                    format: uuid
+                  status:
+                    type: string
+                    enum: [processing, completed, failed]
+                  estimated_time:
+                    type: integer
+                    description: Estimated completion time in seconds
+        '400':
+          description: Missing required fields or validation error
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                  missing_fields:
+                    type: array
+                    items:
+                      type: string
+                  validation_errors:
+                    type: object
+                    additionalProperties:
+                      type: string
+        '402':
+          description: Document limit reached for subscription tier
+        '403':
+          description: Subscription expired or blocked
+
+  /documents/generated:
+    get:
+      summary: List user's generated documents
+      tags: [Documents]
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: category
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [processing, completed, failed]
+      responses:
+        '200':
+          description: List of generated documents
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  documents:
+                    type: array
+                    items:
+                      $ref: './openapi.yaml#/components/schemas/GeneratedDocument'
+                  total:
+                    type: integer
+                  limit:
+                    type: integer
+                  offset:
+                    type: integer
+
+  /documents/generated/{document_id}:
+    get:
+      summary: Get generated document details
+      tags: [Documents]
+      parameters:
+        - name: document_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Document details
+          content:
+            application/json:
+              schema:
+                $ref: './openapi.yaml#/components/schemas/GeneratedDocument'
+        '404':
+          description: Document not found
+
+    delete:
+      summary: Delete generated document
+      tags: [Documents]
+      parameters:
+        - name: document_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Document deleted
+        '404':
+          description: Document not found
+
+  /documents/generated/{document_id}/download:
+    get:
+      summary: Download generated document
+      tags: [Documents]
+      parameters:
+        - name: document_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: format
+          in: query
+          schema:
+            type: string
+            enum: [docx, pdf]
+            default: docx
+      responses:
+        '200':
+          description: Document file
+          content:
+            application/vnd.openxmlformats-officedocument.wordprocessingml.document:
+              schema:
+                type: string
+                format: binary
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: Document not found
+        '409':
+          description: Document still processing
+
+  /documents/upload:
+    post:
+      summary: Upload document for knowledge base
+      tags: [Documents]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+                - category
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: PDF, DOCX, or TXT file
+                category:
+                  type: string
+                  description: Document category matching role
+                title:
+                  type: string
+                description:
+                  type: string
+                is_sample_template:
+                  type: boolean
+                  default: false
+      responses:
+        '201':
+          description: Document uploaded, pending review
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  document_id:
+                    type: string
+                    format: uuid
+                  status:
+                    type: string
+                    enum: [pending]
+                  message:
+                    type: string
+                    example: "Document uploaded successfully. Pending admin review."
+        '400':
+          description: Invalid file format or size
+        '402':
+          description: Storage limit reached
+        '413':
+          description: File too large (max 50MB)
+
+  /documents/contributions:
+    get:
+      summary: List user's uploaded documents
+      tags: [Documents]
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, approved, rejected, needs_manual_review]
+      responses:
+        '200':
+          description: List of contributed documents
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  documents:
+                    type: array
+                    items:
+                      $ref: './openapi.yaml#/components/schemas/Document'
+                  total:
+                    type: integer
+                  limit:
+                    type: integer
+                  offset:
+                    type: integer
+
+  /documents/contributions/{document_id}:
+    get:
+      summary: Get contributed document details
+      tags: [Documents]
+      parameters:
+        - name: document_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Document details
+          content:
+            application/json:
+              schema:
+                $ref: './openapi.yaml#/components/schemas/Document'
+        '404':
+          description: Document not found
+
+  /admin/documents/pending:
+    get:
+      summary: Get pending documents for review (admin)
+      tags: [Documents, Admin]
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: category
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of pending documents
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  documents:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: './openapi.yaml#/components/schemas/Document'
+                        - type: object
+                          properties:
+                            ai_summary:
+                              type: string
+                              description: AI-generated content summary
+                            quality_score:
+                              type: integer
+                              minimum: 0
+                              maximum: 100
+                            uploaded_by:
+                              type: object
+                              properties:
+                                user_id:
+                                  type: string
+                                  format: uuid
+                                full_name:
+                                  type: string
+                  total:
+                    type: integer
+        '403':
+          description: Admin access required
+
+  /admin/documents/{document_id}/review:
+    post:
+      summary: Review and approve/reject document (admin)
+      tags: [Documents, Admin]
+      parameters:
+        - name: document_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - action
+              properties:
+                action:
+                  type: string
+                  enum: [approve, reject, needs_manual_review]
+                reason:
+                  type: string
+                  description: Required for reject action
+                quality_score:
+                  type: integer
+                  minimum: 0
+                  maximum: 100
+                  description: Optional quality score override
+      responses:
+        '200':
+          description: Document reviewed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  document_id:
+                    type: string
+                    format: uuid
+                  status:
+                    type: string
+                  message:
+                    type: string
+        '400':
+          description: Invalid action or missing reason
+        '403':
+          description: Admin access required
+        '404':
+          description: Document not found
+
+  /admin/documents/templates:
+    post:
+      summary: Create document template (admin)
+      tags: [Documents, Admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - role_id
+                - name
+                - category
+                - required_fields
+              properties:
+                role_id:
+                  type: string
+                  format: uuid
+                name:
+                  type: string
+                category:
+                  type: string
+                description:
+                  type: string
+                required_fields:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - field_name
+                      - field_type
+                      - required
+                    properties:
+                      field_name:
+                        type: string
+                      field_type:
+                        type: string
+                        enum: [text, number, date, boolean, select]
+                      required:
+                        type: boolean
+                      options:
+                        type: array
+                        items:
+                          type: string
+                template_file:
+                  type: string
+                  description: Base64 encoded DOCX template
+      responses:
+        '201':
+          description: Template created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  template_id:
+                    type: string
+                    format: uuid
+                  message:
+                    type: string
+        '400':
+          description: Validation error
+        '403':
+          description: Admin access required
+
+  /admin/documents/templates/{template_id}:
+    put:
+      summary: Update document template (admin)
+      tags: [Documents, Admin]
+      parameters:
+        - name: template_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+                required_fields:
+                  type: array
+                  items:
+                    type: object
+                template_file:
+                  type: string
+      responses:
+        '200':
+          description: Template updated
+        '403':
+          description: Admin access required
+        '404':
+          description: Template not found
+
+    delete:
+      summary: Delete document template (admin)
+      tags: [Documents, Admin]
+      parameters:
+        - name: template_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Template deleted
+        '403':
+          description: Admin access required
+        '404':
+          description: Template not found

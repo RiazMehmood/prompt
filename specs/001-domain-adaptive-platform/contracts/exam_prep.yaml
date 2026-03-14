@@ -1,0 +1,687 @@
+openapi: 3.1.0
+info:
+  title: Medical Exam Preparation API
+  version: 1.0.0
+  description: Premium add-on for medical professionals
+
+paths:
+  /exam-prep/subjects:
+    get:
+      summary: Get available exam subjects
+      tags: [Exam Prep]
+      responses:
+        '200':
+          description: List of exam subjects
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    subject_id:
+                      type: string
+                      format: uuid
+                    name:
+                      type: string
+                      example: "Anatomy"
+                    total_questions:
+                      type: integer
+                    topics:
+                      type: array
+                      items:
+                        type: string
+        '402':
+          description: Exam prep add-on not purchased
+        '403':
+          description: Not available for user's role
+
+  /exam-prep/subjects/{subject_id}/topics:
+    get:
+      summary: Get topics for a subject
+      tags: [Exam Prep]
+      parameters:
+        - name: subject_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: List of topics
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    topic:
+                      type: string
+                    question_count:
+                      type: integer
+                    difficulty_distribution:
+                      type: object
+                      properties:
+                        easy:
+                          type: integer
+                        medium:
+                          type: integer
+                        hard:
+                          type: integer
+        '402':
+          description: Exam prep add-on not purchased
+        '404':
+          description: Subject not found
+
+  /exam-prep/practice:
+    post:
+      summary: Start practice session
+      tags: [Exam Prep]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - subject
+              properties:
+                subject:
+                  type: string
+                  format: uuid
+                topics:
+                  type: array
+                  items:
+                    type: string
+                  description: Filter by specific topics
+                difficulty:
+                  type: string
+                  enum: [easy, medium, hard, mixed]
+                  default: mixed
+                question_count:
+                  type: integer
+                  default: 10
+                  minimum: 5
+                  maximum: 50
+      responses:
+        '201':
+          description: Practice session started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  attempt_id:
+                    type: string
+                    format: uuid
+                  questions:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        question_id:
+                          type: string
+                          format: uuid
+                        question_text:
+                          type: string
+                        options:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              option:
+                                type: string
+                                example: "A"
+                              text:
+                                type: string
+        '400':
+          description: Invalid parameters
+        '402':
+          description: Exam prep add-on not purchased
+
+  /exam-prep/test:
+    post:
+      summary: Start timed test
+      tags: [Exam Prep]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - subject
+                - question_count
+              properties:
+                subject:
+                  type: string
+                  format: uuid
+                question_count:
+                  type: integer
+                  minimum: 20
+                  maximum: 200
+                time_limit:
+                  type: integer
+                  description: Time limit in minutes
+                  minimum: 30
+                  maximum: 300
+      responses:
+        '201':
+          description: Test started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  attempt_id:
+                    type: string
+                    format: uuid
+                  questions:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        question_id:
+                          type: string
+                          format: uuid
+                        question_text:
+                          type: string
+                        options:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              option:
+                                type: string
+                              text:
+                                type: string
+                  time_limit:
+                    type: integer
+                  started_at:
+                    type: string
+                    format: date-time
+        '400':
+          description: Invalid parameters
+        '402':
+          description: Exam prep add-on not purchased
+
+  /exam-prep/attempts/{attempt_id}/submit:
+    post:
+      summary: Submit answers for attempt
+      tags: [Exam Prep]
+      parameters:
+        - name: attempt_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - answers
+              properties:
+                answers:
+                  type: object
+                  additionalProperties:
+                    type: string
+                    description: question_id -> selected_option (A/B/C/D)
+                time_taken:
+                  type: integer
+                  description: Time taken in seconds
+      responses:
+        '200':
+          description: Answers submitted and graded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  attempt_id:
+                    type: string
+                    format: uuid
+                  score:
+                    type: integer
+                    description: Number of correct answers
+                  total:
+                    type: integer
+                  percentage:
+                    type: number
+                    format: float
+                  time_taken:
+                    type: integer
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        question_id:
+                          type: string
+                          format: uuid
+                        question_text:
+                          type: string
+                        selected_option:
+                          type: string
+                        correct_option:
+                          type: string
+                        is_correct:
+                          type: boolean
+                        explanation:
+                          type: string
+                        references:
+                          type: string
+                  performance_breakdown:
+                    type: object
+                    additionalProperties:
+                      type: object
+                      properties:
+                        correct:
+                          type: integer
+                        total:
+                          type: integer
+                        percentage:
+                          type: number
+        '404':
+          description: Attempt not found
+        '409':
+          description: Attempt already submitted
+
+  /exam-prep/attempts/{attempt_id}/review:
+    get:
+      summary: Review submitted attempt
+      tags: [Exam Prep]
+      parameters:
+        - name: attempt_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Attempt review
+          content:
+            application/json:
+              schema:
+                $ref: './openapi.yaml#/components/schemas/ExamAttempt'
+        '404':
+          description: Attempt not found
+        '409':
+          description: Attempt not yet submitted
+
+  /exam-prep/attempts:
+    get:
+      summary: Get user's exam attempts history
+      tags: [Exam Prep]
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: mode
+          in: query
+          schema:
+            type: string
+            enum: [practice, test, review]
+        - name: subject
+          in: query
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: List of attempts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  attempts:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        attempt_id:
+                          type: string
+                          format: uuid
+                        mode:
+                          type: string
+                        subject:
+                          type: string
+                        score:
+                          type: integer
+                        total:
+                          type: integer
+                        percentage:
+                          type: number
+                        time_taken:
+                          type: integer
+                        created_at:
+                          type: string
+                          format: date-time
+                  total:
+                    type: integer
+
+  /exam-prep/performance:
+    get:
+      summary: Get overall performance analytics
+      tags: [Exam Prep]
+      parameters:
+        - name: subject
+          in: query
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Performance analytics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  overall:
+                    type: object
+                    properties:
+                      total_attempts:
+                        type: integer
+                      average_score:
+                        type: number
+                        format: float
+                      improvement_trend:
+                        type: string
+                        enum: [improving, stable, declining]
+                  by_subject:
+                    type: object
+                    additionalProperties:
+                      type: object
+                      properties:
+                        attempts:
+                          type: integer
+                        average_score:
+                          type: number
+                        best_score:
+                          type: number
+                        recent_trend:
+                          type: string
+                  by_topic:
+                    type: object
+                    additionalProperties:
+                      type: object
+                      properties:
+                        correct:
+                          type: integer
+                        total:
+                          type: integer
+                        percentage:
+                          type: number
+                  weak_areas:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        topic:
+                          type: string
+                        accuracy:
+                          type: number
+                        recommendation:
+                          type: string
+                  strong_areas:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        topic:
+                          type: string
+                        accuracy:
+                          type: number
+
+  /exam-prep/questions/{question_id}/report:
+    post:
+      summary: Report issue with question
+      tags: [Exam Prep]
+      parameters:
+        - name: question_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - issue_type
+              properties:
+                issue_type:
+                  type: string
+                  enum: [incorrect_answer, typo, unclear_question, outdated_info, other]
+                description:
+                  type: string
+                  maxLength: 500
+      responses:
+        '200':
+          description: Issue reported
+        '404':
+          description: Question not found
+
+  /admin/exam-prep/questions:
+    get:
+      summary: List all exam questions (admin)
+      tags: [Exam Prep, Admin]
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            maximum: 200
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: subject
+          in: query
+          schema:
+            type: string
+        - name: topic
+          in: query
+          schema:
+            type: string
+        - name: difficulty
+          in: query
+          schema:
+            type: string
+            enum: [easy, medium, hard]
+      responses:
+        '200':
+          description: List of questions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  questions:
+                    type: array
+                    items:
+                      $ref: './openapi.yaml#/components/schemas/ExamQuestion'
+                  total:
+                    type: integer
+        '403':
+          description: Admin access required
+
+    post:
+      summary: Create exam question (admin)
+      tags: [Exam Prep, Admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - subject
+                - topic
+                - question_text
+                - options
+              properties:
+                subject:
+                  type: string
+                topic:
+                  type: string
+                difficulty:
+                  type: string
+                  enum: [easy, medium, hard]
+                question_text:
+                  type: string
+                options:
+                  type: array
+                  minItems: 4
+                  maxItems: 5
+                  items:
+                    type: object
+                    required:
+                      - option
+                      - text
+                      - is_correct
+                    properties:
+                      option:
+                        type: string
+                      text:
+                        type: string
+                      is_correct:
+                        type: boolean
+                explanation:
+                  type: string
+                references:
+                  type: string
+      responses:
+        '201':
+          description: Question created
+          content:
+            application/json:
+              schema:
+                $ref: './openapi.yaml#/components/schemas/ExamQuestion'
+        '400':
+          description: Validation error
+        '403':
+          description: Admin access required
+
+  /admin/exam-prep/questions/{question_id}:
+    put:
+      summary: Update exam question (admin)
+      tags: [Exam Prep, Admin]
+      parameters:
+        - name: question_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                question_text:
+                  type: string
+                options:
+                  type: array
+                  items:
+                    type: object
+                explanation:
+                  type: string
+                references:
+                  type: string
+                difficulty:
+                  type: string
+                  enum: [easy, medium, hard]
+      responses:
+        '200':
+          description: Question updated
+        '400':
+          description: Validation error
+        '403':
+          description: Admin access required
+        '404':
+          description: Question not found
+
+    delete:
+      summary: Delete exam question (admin)
+      tags: [Exam Prep, Admin]
+      parameters:
+        - name: question_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Question deleted
+        '403':
+          description: Admin access required
+        '404':
+          description: Question not found
+
+  /admin/exam-prep/bulk-import:
+    post:
+      summary: Bulk import questions from CSV/JSON (admin)
+      tags: [Exam Prep, Admin]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: CSV or JSON file with questions
+      responses:
+        '200':
+          description: Import completed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  imported:
+                    type: integer
+                  failed:
+                    type: integer
+                  errors:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        row:
+                          type: integer
+                        error:
+                          type: string
+        '400':
+          description: Invalid file format
+        '403':
+          description: Admin access required
