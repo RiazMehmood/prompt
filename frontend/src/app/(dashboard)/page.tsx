@@ -1,34 +1,19 @@
+"use client";
+
+import { ChatInterface } from "@/components/chat/ChatInterface";
+
 export default function DashboardPage() {
   return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-3xl font-bold">Welcome to Your Dashboard</h2>
+    <div className="flex h-[calc(100vh-8rem)] flex-col">
+      <div className="mb-4">
+        <h2 className="text-3xl font-bold">Legal Assistant</h2>
         <p className="text-muted-foreground">
-          Start by asking a legal question or generating a document
+          Ask questions about Pakistani law and get AI-powered answers
         </p>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        <div className="rounded-lg border p-6">
-          <h3 className="font-semibold">Chat with AI</h3>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Ask legal questions and get AI-powered answers with citations
-          </p>
-        </div>
-
-        <div className="rounded-lg border p-6">
-          <h3 className="font-semibold">Generate Documents</h3>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Create bail applications and other legal documents
-          </p>
-        </div>
-
-        <div className="rounded-lg border p-6">
-          <h3 className="font-semibold">Document Library</h3>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Access your generated documents and legal resources
-          </p>
-        </div>
+      <div className="flex-1 overflow-hidden rounded-lg border">
+        <ChatInterface />
       </div>
     </div>
   );
