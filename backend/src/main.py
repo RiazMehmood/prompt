@@ -39,6 +39,7 @@ async def root():
     }
 
 
-# API v1 router will be mounted here
-# from backend.src.api.v1 import api_router
-# app.include_router(api_router, prefix="/api/v1")
+# Mount API v1 routers
+from backend.src.api.v1.auth import router as auth_router
+
+app.include_router(auth_router, prefix="/api/v1")
