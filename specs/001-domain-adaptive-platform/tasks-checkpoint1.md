@@ -74,44 +74,44 @@
 
 ### Database & ORM Foundation
 
-- [ ] T015 Connect to Supabase Free (500MB PostgreSQL + pgvector) and verify connection in `backend/src/db/supabase_client.py`
-- [ ] T016 Create database session management module in `backend/src/db/session.py` with async Supabase client, connection pooling
-- [ ] T017 [P] Create Role model (Pydantic + Supabase schema) in `backend/src/models/role.py` with fields: role_id, role_name (default: "lawyer"), display_name, category, ai_persona_prompt, sidebar_features (JSON), created_at
-- [ ] T018 [P] Create User model (Pydantic + Supabase schema) in `backend/src/models/user.py` with fields: user_id, tenant_id, email (nullable), password_hash (nullable), phone_number (nullable), auth_method, google_id (nullable), full_name, role_id (FK→roles, default: lawyer), account_status, created_at
-- [ ] T019 [P] Create Admin model (Pydantic + Supabase schema) in `backend/src/models/admin.py` with fields: admin_id, user_id, admin_type (default: "root"), permissions (JSON), created_at, is_active
-- [ ] T020 Create Supabase migrations for Role, User, Admin tables using Supabase CLI in `backend/supabase/migrations/`
+- [X] T015 Connect to Supabase Free (500MB PostgreSQL + pgvector) and verify connection in `backend/src/db/supabase_client.py`
+- [X] T016 Create database session management module in `backend/src/db/session.py` with async Supabase client, connection pooling
+- [X] T017 [P] Create Role model (Pydantic + Supabase schema) in `backend/src/models/role.py` with fields: role_id, role_name (default: "lawyer"), display_name, category, ai_persona_prompt, sidebar_features (JSON), created_at
+- [X] T018 [P] Create User model (Pydantic + Supabase schema) in `backend/src/models/user.py` with fields: user_id, tenant_id, email (nullable), password_hash (nullable), phone_number (nullable), auth_method, google_id (nullable), full_name, role_id (FK→roles, default: lawyer), account_status, created_at
+- [X] T019 [P] Create Admin model (Pydantic + Supabase schema) in `backend/src/models/admin.py` with fields: admin_id, user_id, admin_type (default: "root"), permissions (JSON), created_at, is_active
+- [X] T020 Create Supabase migrations for Role, User, Admin tables using Supabase CLI in `backend/supabase/migrations/`
 - [ ] T021 Create Row-Level Security (RLS) policies in Supabase dashboard for users, documents, chat_sessions tables
 - [ ] T022 Create database seed script in `backend/scripts/seed_data.py` with: 1 lawyer role, 1 Root Admin user, 50-100 sample legal documents (PPC, CrPC sections)
 
 ### API Framework & Middleware
 
-- [ ] T023 Create FastAPI application entry point in `backend/src/main.py` with CORS (allow Vercel frontend), health check endpoint (`/health`), API v1 router mounting
-- [ ] T024 [P] Create JWT authentication middleware in `backend/src/api/middleware.py` with token validation, rate limiting (Upstash Redis Free), CORS configuration
-- [ ] T025 [P] Create FastAPI dependencies module in `backend/src/api/dependencies.py` with `get_db` (Supabase client), `get_current_user` (JWT decode), `get_admin_user` (admin check)
-- [ ] T026 [P] Create shared Pydantic response/error schemas in `backend/src/models/common.py` with Error schema, pagination models, standard response wrappers
+- [X] T023 Create FastAPI application entry point in `backend/src/main.py` with CORS (allow Vercel frontend), health check endpoint (`/health`), API v1 router mounting
+- [X] T024 [P] Create JWT authentication middleware in `backend/src/api/middleware.py` with token validation, rate limiting (Upstash Redis Free), CORS configuration
+- [X] T025 [P] Create FastAPI dependencies module in `backend/src/api/dependencies.py` with `get_db` (Supabase client), `get_current_user` (JWT decode), `get_admin_user` (admin check)
+- [X] T026 [P] Create shared Pydantic response/error schemas in `backend/src/models/common.py` with Error schema, pagination models, standard response wrappers
 
 ### Frontend Framework Foundation
 
-- [ ] T027 Create Next.js 14 App Router layout in `frontend/src/app/layout.tsx` with providers (TanStack Query, Zustand)
-- [ ] T028 [P] Create API client module in `shared/src/api/client.ts` with typed fetch wrapper, JWT token injection, error handling (shared between web and mobile)
-- [ ] T029 [P] Create auth helper module in `shared/src/lib/auth.ts` with token storage (localStorage for web, Expo SecureStore for mobile), user session management
-- [ ] T030 [P] Create Zustand auth store in `shared/src/stores/authStore.ts` with user state, login/logout actions, token management
-- [ ] T031 [P] Create TypeScript API types in `shared/src/types/api.ts` matching Pydantic schemas (User, Role, Admin, Error, Document, ChatMessage)
-- [ ] T032 [P] Setup shadcn/ui component library with base components (Button, Input, Card, Dialog, Select, Toast) in `frontend/src/components/ui/`
+- [X] T027 Create Next.js 14 App Router layout in `frontend/src/app/layout.tsx` with providers (TanStack Query, Zustand)
+- [X] T028 [P] Create API client module in `shared/src/api/client.ts` with typed fetch wrapper, JWT token injection, error handling (shared between web and mobile)
+- [X] T029 [P] Create auth helper module in `shared/src/lib/auth.ts` with token storage (localStorage for web, Expo SecureStore for mobile), user session management
+- [X] T030 [P] Create Zustand auth store in `shared/src/stores/authStore.ts` with user state, login/logout actions, token management
+- [X] T031 [P] Create TypeScript API types in `shared/src/types/api.ts` matching Pydantic schemas (User, Role, Admin, Error, Document, ChatMessage)
+- [X] T032 [P] Setup shadcn/ui component library with base components (Button, Input, Card, Dialog, Select, Toast) in `frontend/src/components/ui/`
 
 ### Mobile Framework Foundation
 
-- [ ] T033 Create Expo Router root layout in `mobile/app/_layout.tsx` with providers (TanStack Query, Zustand)
-- [ ] T034 [P] Import shared API client from `@shared/api` in mobile app
-- [ ] T035 [P] Import shared auth helper from `@shared/lib/auth` with Expo SecureStore adapter
-- [ ] T036 [P] Import shared Zustand auth store from `@shared/stores/authStore`
-- [ ] T037 [P] Import shared TypeScript API types from `@shared/types/api`
-- [ ] T038 [P] Setup React Native Paper component library with theme configuration in `mobile/lib/theme.ts`
-- [ ] T039 [P] Create biometric authentication helper in `mobile/lib/biometric.ts` using Expo LocalAuthentication
+- [X] T033 Create Expo Router root layout in `mobile/app/_layout.tsx` with providers (TanStack Query, Zustand)
+- [X] T034 [P] Import shared API client from `@shared/api` in mobile app
+- [X] T035 [P] Import shared auth helper from `@shared/lib/auth` with Expo SecureStore adapter
+- [X] T036 [P] Import shared Zustand auth store from `@shared/stores/authStore`
+- [X] T037 [P] Import shared TypeScript API types from `@shared/types/api`
+- [X] T038 [P] Setup React Native Paper component library with theme configuration in `mobile/lib/theme.ts`
+- [X] T039 [P] Create biometric authentication helper in `mobile/lib/biometric.ts` using Expo LocalAuthentication
 
 ### Redis & Cache Infrastructure
 
-- [ ] T040 Create Upstash Redis Free connection in `backend/src/db/redis.py` with async connection, health check, key namespace utilities (10,000 commands/day limit)
+- [X] T040 Create Upstash Redis Free connection in `backend/src/db/redis.py` with async connection, health check, key namespace utilities (10,000 commands/day limit)
 
 **Checkpoint**: Foundation ready — user story implementation can now begin
 
