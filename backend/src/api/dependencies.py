@@ -36,13 +36,13 @@ async def get_current_user(
 
     token = authorization.removeprefix("Bearer ").strip()
     try:
-        payload = jwt.decode(
-            token,
-            settings.JWT_SECRET,
-            algorithms=[settings.JWT_ALGORITHM],
-            options={"verify_aud": False},  # Supabase JWT uses 'authenticated' audience
-        )
-    except JWTError as exc:
+        # Validate token via Supabase (handles both HS256 and ES256 algorithms)
+        admin = get_supabase_admin()
+        auth_response = admin.auth.get_user(token)
+        if auth_response is None or auth_response.user is None:
+            raise ValueError("No user returned")
+        user_id: Optional[str] = auth_response.user.id
+    except Exception as exc:
         logger.warning("jwt_invalid", error=str(exc))
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -50,7 +50,6 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         ) from exc
 
-    user_id: Optional[str] = payload.get("sub")
     if not user_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -61,7 +60,6 @@ async def get_current_user(
     structlog.contextvars.bind_contextvars(user_id=user_id)
 
     # Load profile from DB to get domain_id, role, etc.
-    admin = get_supabase_admin()
     try:
         result = admin.table("profiles").select(
             "id, email, phone, domain_id, subscription_tier, role, "

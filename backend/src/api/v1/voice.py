@@ -32,7 +32,7 @@ ALLOWED_AUDIO_TYPES = {"audio/wav", "audio/mpeg", "audio/ogg", "audio/webm", "au
 MAX_AUDIO_SIZE = 25 * 1024 * 1024  # 25 MB (Whisper limit)
 
 
-@router.post("/voice/transcribe", response_model=TranscribeResponse)
+@router.post("/transcribe", response_model=TranscribeResponse)
 async def transcribe_audio(
     audio: UploadFile = File(..., description="Audio file (WAV/MP3/OGG/WebM, max 25MB)"),
     language_hint: str = Form(default=None),
@@ -81,7 +81,7 @@ async def transcribe_audio(
         raise HTTPException(status_code=500, detail=f"Transcription failed: {exc}") from exc
 
 
-@router.get("/voice/sessions/{session_id}", response_model=VoiceSessionDetail)
+@router.get("/sessions/{session_id}", response_model=VoiceSessionDetail)
 async def get_voice_session(
     session_id: str,
     current_user: dict = Depends(get_current_user),
@@ -93,7 +93,7 @@ async def get_voice_session(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.post("/voice/synthesize", response_model=SpeechSynthesisResponse)
+@router.post("/synthesize", response_model=SpeechSynthesisResponse)
 async def synthesize_speech(
     body: SpeechSynthesisRequest,
     current_user: dict = Depends(get_current_user),
@@ -132,7 +132,7 @@ async def synthesize_speech(
     )
 
 
-@router.get("/voice/audio/{filename}")
+@router.get("/audio/{filename}")
 async def serve_audio(filename: str, current_user: dict = Depends(get_current_user)):
     """Serve cached TTS audio file."""
     from src.services.voice.tts_cache import _CACHE_DIR
