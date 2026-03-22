@@ -1,46 +1,35 @@
-"use client";
+'use client';
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button";
-import { useAuthStore } from "shared/stores/authStore";
-import { authHelper } from "shared/lib/auth";
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8000';
 
-export default function LoginPage() {
+export default function AdminLoginPage() {
   const router = useRouter();
-  const [method, setMethod] = useState<"email" | "phone" | "google" | null>(null);
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
 
-  const setAuth = useAuthStore((state) => state.setAuth);
-
-  const handleEmailLogin = async (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError('');
     setLoading(true);
-    setError("");
-
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/auth/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      const res = await fetch(`${API_BASE}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
       });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error?.message ?? 'Login failed');
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || "Login failed");
+      if (!['domain_admin', 'root_admin'].includes(data.user?.role)) {
+        throw new Error('Admin access required');
       }
-
-      // Store auth data
-      await authHelper.setToken(data.access_token);
-      await authHelper.setUser(data.user);
-      setAuth(data.user, data.access_token);
-
-      // Redirect to dashboard
-      router.push("/dashboard");
+      localStorage.setItem('admin_token', data.access_token);
+      localStorage.setItem('admin_user', JSON.stringify(data.user));
+      router.push('/dashboard');
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -48,112 +37,46 @@ export default function LoginPage() {
     }
   };
 
-  if (!method) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50">
-        <div className="w-full max-w-md space-y-8 rounded-lg bg-white p-8 shadow">
-          <div className="text-center">
-            <h1 className="text-3xl font-bold">Welcome Back</h1>
-            <p className="mt-2 text-muted-foreground">Choose your login method</p>
-          </div>
-
-          <div className="space-y-3">
-            <Button variant="outline" onClick={() => setMethod("email")} className="w-full">
-              Login with Email
-            </Button>
-
-            <Button variant="outline" onClick={() => setMethod("phone")} className="w-full">
-              Login with Phone
-            </Button>
-
-            <Button variant="outline" onClick={() => setMethod("google")} className="w-full">
-              Login with Google
-            </Button>
-          </div>
-
-          <p className="text-center text-sm text-muted-foreground">
-            Don't have an account?{" "}
-            <a href="/signup" className="text-primary hover:underline">
-              Sign up
-            </a>
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  if (method === "email") {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50">
-        <div className="w-full max-w-md space-y-8 rounded-lg bg-white p-8 shadow">
-          <div className="text-center">
-            <h1 className="text-3xl font-bold">Login</h1>
-            <p className="mt-2 text-muted-foreground">Sign in with your email</p>
-          </div>
-
-          <form onSubmit={handleEmailLogin} className="space-y-4">
-            <div>
-              <label htmlFor="email" className="block text-sm font-medium mb-1">
-                Email
-              </label>
-              <input
-                id="email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                className="w-full px-3 py-2 border rounded-md"
-                placeholder="lawyer@example.com"
-              />
-            </div>
-
-            <div>
-              <label htmlFor="password" className="block text-sm font-medium mb-1">
-                Password
-              </label>
-              <input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                className="w-full px-3 py-2 border rounded-md"
-              />
-            </div>
-
-            {error && <p className="text-sm text-red-600">{error}</p>}
-
-            <Button type="submit" disabled={loading} className="w-full">
-              {loading ? "Logging in..." : "Login"}
-            </Button>
-
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => setMethod(null)}
-              className="w-full"
-            >
-              Back to options
-            </Button>
-          </form>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50">
-      <div className="w-full max-w-md space-y-8 rounded-lg bg-white p-8 shadow">
-        <div className="text-center">
-          <h1 className="text-3xl font-bold">Login</h1>
-          <p className="mt-2 text-muted-foreground">
-            {method === "phone" ? "Phone login" : "Google login"} coming soon
-          </p>
-        </div>
+    <div className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="max-w-md w-full bg-white rounded-xl shadow-sm p-8">
+        <h1 className="text-2xl font-bold text-gray-900 mb-2">Admin Login</h1>
+        <p className="text-gray-500 mb-8">Prompt Platform Administration</p>
 
-        <Button variant="ghost" onClick={() => setMethod(null)} className="w-full">
-          Back to options
-        </Button>
+        <form onSubmit={handleLogin} className="space-y-4">
+          {error && (
+            <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg p-3 text-sm">
+              {error}
+            </div>
+          )}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+              className="w-full border border-gray-300 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              className="w-full border border-gray-300 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full bg-gray-900 text-white py-3 rounded-lg font-medium disabled:opacity-50 hover:bg-gray-800 transition"
+          >
+            {loading ? 'Signing in...' : 'Sign In'}
+          </button>
+        </form>
       </div>
     </div>
   );

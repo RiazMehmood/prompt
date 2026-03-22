@@ -1,79 +1,152 @@
-"""Typed API client with JWT token injection and error handling."""
-from typing import Optional
-import { ErrorResponse } from "@shared/types/api";
+/**
+ * Shared API client with JWT auth header injection and refresh token handling.
+ * Used by both frontend (Next.js) and mobile (React Native).
+ */
+import axios, { AxiosInstance, AxiosRequestConfig, InternalAxiosRequestConfig } from 'axios';
+import type { ApiError, LoginResponse } from '../types/api';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+// Token storage interface — implemented differently per platform
+// Frontend: localStorage / cookies | Mobile: @react-native-async-storage/async-storage
+export interface TokenStorage {
+  getAccessToken(): Promise<string | null>;
+  getRefreshToken(): Promise<string | null>;
+  setTokens(accessToken: string, refreshToken: string): Promise<void>;
+  clearTokens(): Promise<void>;
+}
 
-export class ApiError extends Error {
-  constructor(
-    public status: number,
-    public error: string,
-    public details?: Record<string, any>
-  ) {
-    super(error);
-    this.name = "ApiError";
+// Simple in-memory fallback (not secure for production)
+class InMemoryTokenStorage implements TokenStorage {
+  private accessToken: string | null = null;
+  private refreshToken: string | null = null;
+
+  async getAccessToken() { return this.accessToken; }
+  async getRefreshToken() { return this.refreshToken; }
+  async setTokens(access: string, refresh: string) {
+    this.accessToken = access;
+    this.refreshToken = refresh;
+  }
+  async clearTokens() {
+    this.accessToken = null;
+    this.refreshToken = null;
   }
 }
 
 export class ApiClient {
-  private baseUrl: string;
-  private getToken: () => string | null;
+  private client: AxiosInstance;
+  private storage: TokenStorage;
+  private isRefreshing = false;
+  private refreshQueue: Array<(token: string) => void> = [];
 
-  constructor(baseUrl: string = API_BASE_URL, getToken: () => string | null) {
-    this.baseUrl = baseUrl;
-    this.getToken = getToken;
+  constructor(baseURL: string, storage?: TokenStorage) {
+    this.storage = storage ?? new InMemoryTokenStorage();
+    this.client = axios.create({
+      baseURL,
+      timeout: 30_000,
+      headers: { 'Content-Type': 'application/json' },
+    });
+    this._setupInterceptors();
   }
 
-  private async request<T>(
-    endpoint: string,
-    options: RequestInit = {}
-  ): Promise<T> {
-    const token = this.getToken();
-    const headers: HeadersInit = {
-      "Content-Type": "application/json",
-      ...options.headers,
-    };
+  private _setupInterceptors(): void {
+    // Request: inject JWT
+    this.client.interceptors.request.use(
+      async (config: InternalAxiosRequestConfig) => {
+        const token = await this.storage.getAccessToken();
+        if (token) {
+          config.headers.Authorization = `Bearer ${token}`;
+        }
+        return config;
+      },
+      (error) => Promise.reject(error),
+    );
 
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
+    // Response: handle 401 with token refresh
+    this.client.interceptors.response.use(
+      (response) => response,
+      async (error) => {
+        const original = error.config as AxiosRequestConfig & { _retry?: boolean };
+        if (error.response?.status === 401 && !original._retry) {
+          original._retry = true;
+          try {
+            const newToken = await this._refreshAccessToken();
+            original.headers = { ...original.headers, Authorization: `Bearer ${newToken}` };
+            return this.client(original);
+          } catch {
+            await this.storage.clearTokens();
+            return Promise.reject(error);
+          }
+        }
+        return Promise.reject(this._normalizeError(error));
+      },
+    );
+  }
+
+  private async _refreshAccessToken(): Promise<string> {
+    if (this.isRefreshing) {
+      return new Promise((resolve) => this.refreshQueue.push(resolve));
     }
-
-    const response = await fetch(`${this.baseUrl}${endpoint}`, {
-      ...options,
-      headers,
-    });
-
-    if (!response.ok) {
-      const errorData: ErrorResponse = await response.json().catch(() => ({
-        error: "UNKNOWN_ERROR",
-        message: "An unknown error occurred",
-      }));
-
-      throw new ApiError(response.status, errorData.message, errorData.details);
+    this.isRefreshing = true;
+    try {
+      const refreshToken = await this.storage.getRefreshToken();
+      if (!refreshToken) throw new Error('No refresh token');
+      const res = await this.client.post<LoginResponse>('/auth/refresh', { refreshToken });
+      const { accessToken, refreshToken: newRefresh } = res.data;
+      await this.storage.setTokens(accessToken, newRefresh);
+      this.refreshQueue.forEach((cb) => cb(accessToken));
+      return accessToken;
+    } finally {
+      this.isRefreshing = false;
+      this.refreshQueue = [];
     }
-
-    return response.json();
   }
 
-  async get<T>(endpoint: string): Promise<T> {
-    return this.request<T>(endpoint, { method: "GET" });
+  private _normalizeError(error: unknown): ApiError {
+    if (axios.isAxiosError(error) && error.response?.data?.error) {
+      return error.response.data.error as ApiError;
+    }
+    return { code: 'NETWORK_ERROR', message: 'Network request failed' };
   }
 
-  async post<T>(endpoint: string, data?: any): Promise<T> {
-    return this.request<T>(endpoint, {
-      method: "POST",
-      body: data ? JSON.stringify(data) : undefined,
+  async get<T>(path: string, config?: AxiosRequestConfig): Promise<T> {
+    const res = await this.client.get<T>(path, config);
+    return res.data;
+  }
+
+  async post<T>(path: string, data?: unknown, config?: AxiosRequestConfig): Promise<T> {
+    const res = await this.client.post<T>(path, data, config);
+    return res.data;
+  }
+
+  async put<T>(path: string, data?: unknown, config?: AxiosRequestConfig): Promise<T> {
+    const res = await this.client.put<T>(path, data, config);
+    return res.data;
+  }
+
+  async delete<T>(path: string, config?: AxiosRequestConfig): Promise<T> {
+    const res = await this.client.delete<T>(path, config);
+    return res.data;
+  }
+
+  async postForm<T>(path: string, formData: FormData, config?: AxiosRequestConfig): Promise<T> {
+    const res = await this.client.post<T>(path, formData, {
+      ...config,
+      headers: { 'Content-Type': 'multipart/form-data' },
     });
+    return res.data;
   }
 
-  async patch<T>(endpoint: string, data?: any): Promise<T> {
-    return this.request<T>(endpoint, {
-      method: "PATCH",
-      body: data ? JSON.stringify(data) : undefined,
-    });
+  setTokens(accessToken: string, refreshToken: string): Promise<void> {
+    return this.storage.setTokens(accessToken, refreshToken);
   }
 
-  async delete<T>(endpoint: string): Promise<T> {
-    return this.request<T>(endpoint, { method: "DELETE" });
+  clearTokens(): Promise<void> {
+    return this.storage.clearTokens();
   }
+}
+
+// Default client instance — configure baseURL from environment
+// Frontend:  process.env.NEXT_PUBLIC_API_BASE_URL
+// Mobile:    process.env.API_BASE_URL (via react-native-config)
+export function createApiClient(baseURL: string, storage?: TokenStorage): ApiClient {
+  return new ApiClient(baseURL, storage);
 }

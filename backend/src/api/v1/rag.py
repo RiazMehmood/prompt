@@ -1,168 +1,159 @@
-"""RAG API router for chat and document queries."""
-from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
-from backend.src.api.dependencies import get_current_user
-from backend.src.services.chat import ChatService
-from backend.src.db.supabase_client import supabase
+"""RAG / Document Generation API router."""
+import asyncio
+import uuid
+from typing import Annotated
 
-router = APIRouter(prefix="/rag", tags=["rag"])
+import structlog
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response, status
+from fastapi.responses import StreamingResponse
 
+from src.api.dependencies import DomainAssignedUser
+from src.models.generated_document import (
+    DocumentDetail,
+    GenerateRequest,
+    GenerateResponse,
+    RagSource,
+)
+from src.services.workflows.document_generation import DocumentGenerationWorkflow
+from src.db.supabase_client import get_supabase_admin
 
-class QueryRequest(BaseModel):
-    query: str
-    session_id: str = None
+router = APIRouter()
+logger = structlog.get_logger(__name__)
 
-
-class QueryResponse(BaseModel):
-    response: str
-    citations: list[str]
-    confidence: float
-    session_id: str
-    cached: bool
-
-
-class CreateSessionResponse(BaseModel):
-    session_id: str
+_workflow = DocumentGenerationWorkflow()
 
 
-@router.post("/query", response_model=QueryResponse)
-async def query_rag(
-    request: QueryRequest,
-    current_user: dict = Depends(get_current_user)
-):
-    """Query RAG system with user question.
+@router.post("/generate", response_model=GenerateResponse, status_code=status.HTTP_202_ACCEPTED)
+async def generate_document(
+    body: GenerateRequest,
+    current_user: DomainAssignedUser,
+    background_tasks: BackgroundTasks,
+) -> GenerateResponse:
+    """Trigger RAG-based document generation.
 
-    Args:
-        request: Query request with question and optional session_id
-        current_user: Authenticated user
-
-    Returns:
-        AI response with citations and confidence
+    Returns immediately with a document ID. Poll GET /generate/{id} for status.
     """
-    user_id = current_user["user_id"]
-    role_id = current_user["role_id"]
+    thread_id = str(uuid.uuid4())
+    admin = get_supabase_admin()
 
-    # Get role AI persona
-    role_response = supabase.table("roles").select("ai_persona_prompt").eq(
-        "role_id", role_id
-    ).execute()
+    # Pre-create a placeholder document row with 'pending' status
+    result = admin.table("generated_documents").insert({
+        "user_id": current_user.id,
+        "template_id": body.template_id,
+        "domain_id": current_user.domain_id,
+        "input_parameters": body.input_parameters,
+        "retrieved_sources": [],
+        "output_content": "",
+        "output_language": body.output_language.value,
+        "output_format": body.output_format.value,
+        "validation_status": "pending",
+    }).execute()
 
-    if not role_response.data:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Role not found"
-        )
+    if not result.data:
+        raise HTTPException(status_code=500, detail="Failed to create document record")
 
-    ai_persona = role_response.data[0]["ai_persona_prompt"]
+    doc_id = result.data[0]["id"]
 
-    # Create session if not provided
-    session_id = request.session_id
-    if not session_id:
-        session_result = await ChatService.create_session(user_id, role_id)
-        if not session_result["success"]:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to create session"
-            )
-        session_id = session_result["session"]["session_id"]
+    async def run_workflow() -> None:
+        try:
+            initial_state = {
+                "user_id": current_user.id,
+                "domain_id": current_user.domain_id,
+                "domain_namespace": current_user.domain_namespace or "",
+                "template_id": body.template_id,
+                "input_parameters": body.input_parameters,
+                "output_language": body.output_language.value,
+                "output_format": body.output_format.value,
+            }
+            final_state = await _workflow.run(initial_state, thread_id=thread_id)
 
-    # Process query with RAG
-    result = await ChatService.query_with_rag(
-        session_id=session_id,
-        user_id=user_id,
-        role_id=role_id,
-        query=request.query,
-        ai_persona=ai_persona
+            # Update the pre-created document with workflow results
+            if final_state.get("generated_doc_id"):
+                # Workflow already persisted a new row; delete the placeholder
+                admin.table("generated_documents").delete().eq("id", doc_id).execute()
+            else:
+                admin.table("generated_documents").update({
+                    "output_content": final_state.get("rendered_content", ""),
+                    "retrieved_sources": final_state.get("provenance_report", []),
+                    "validation_status": final_state.get("validation_status", "invalid"),
+                    "validation_errors": (
+                        {"errors": final_state.get("validation_errors", [])}
+                        if final_state.get("validation_errors")
+                        else None
+                    ),
+                }).eq("id", doc_id).execute()
+        except Exception as exc:
+            logger.error("workflow_background_failed", doc_id=doc_id, error=str(exc))
+            admin.table("generated_documents").update({
+                "validation_status": "invalid",
+                "validation_errors": {"errors": [str(exc)]},
+            }).eq("id", doc_id).execute()
+
+    background_tasks.add_task(run_workflow)
+    return GenerateResponse(id=doc_id, status="pending", message="Document generation started")
+
+
+@router.get("/generate/{doc_id}", response_model=DocumentDetail)
+async def get_generated_document(
+    doc_id: str,
+    current_user: DomainAssignedUser,
+) -> DocumentDetail:
+    """Poll generated document status and retrieve content when complete."""
+    admin = get_supabase_admin()
+    result = admin.table("generated_documents").select("*").eq("id", doc_id).eq(
+        "user_id", current_user.id
+    ).single().execute()
+    if not result.data:
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Document not found"})
+    data = result.data
+    return DocumentDetail(
+        id=data["id"],
+        template_id=data["template_id"],
+        domain_id=data["domain_id"],
+        output_content=data.get("output_content", ""),
+        output_language=data.get("output_language", "english"),
+        output_format=data.get("output_format", "in_app"),
+        validation_status=data.get("validation_status", "pending"),
+        validation_errors=data.get("validation_errors"),
+        retrieved_sources=[RagSource(**s) for s in (data.get("retrieved_sources") or [])],
+        created_at=data["created_at"],
     )
 
-    if not result["success"]:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=result.get("error", "Query failed")
-        )
 
-    return {
-        "response": result["response"],
-        "citations": result["citations"],
-        "confidence": result["confidence"],
-        "session_id": session_id,
-        "cached": result.get("cached", False)
-    }
+@router.get("/generate/{doc_id}/export")
+async def export_document(
+    doc_id: str,
+    format: str,
+    current_user: DomainAssignedUser,
+) -> Response:
+    """Export a generated document as PDF or DOCX."""
+    if format not in ("pdf", "docx"):
+        raise HTTPException(status_code=400, detail="format must be 'pdf' or 'docx'")
 
+    admin = get_supabase_admin()
+    result = admin.table("generated_documents").select("*").eq("id", doc_id).eq(
+        "user_id", current_user.id
+    ).single().execute()
+    if not result.data or result.data.get("validation_status") != "valid":
+        raise HTTPException(status_code=404, detail="Document not found or not yet valid")
 
-@router.post("/sessions", response_model=CreateSessionResponse)
-async def create_session(current_user: dict = Depends(get_current_user)):
-    """Create new chat session.
+    data = result.data
+    content = data.get("output_content", "")
+    output_language = data.get("output_language", "english")
 
-    Args:
-        current_user: Authenticated user
+    if format == "pdf":
+        from src.services.documents.pdf_export import PDFExportService
+        file_bytes = PDFExportService().export(content, output_language=output_language)
+        media_type = "application/pdf"
+        filename = f"document-{doc_id[:8]}.pdf"
+    else:
+        from src.services.documents.docx_export import DOCXExportService
+        file_bytes = DOCXExportService().export(content, output_language=output_language)
+        media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        filename = f"document-{doc_id[:8]}.docx"
 
-    Returns:
-        Session ID
-    """
-    result = await ChatService.create_session(
-        current_user["user_id"],
-        current_user["role_id"]
+    return Response(
+        content=file_bytes,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
-
-    if not result["success"]:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create session"
-        )
-
-    return {"session_id": result["session"]["session_id"]}
-
-
-@router.get("/sessions")
-async def get_sessions(current_user: dict = Depends(get_current_user)):
-    """Get user's chat sessions.
-
-    Args:
-        current_user: Authenticated user
-
-    Returns:
-        List of chat sessions
-    """
-    result = await ChatService.get_sessions(current_user["user_id"])
-
-    if not result["success"]:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to fetch sessions"
-        )
-
-    return {
-        "success": True,
-        "sessions": result["sessions"]
-    }
-
-
-@router.get("/sessions/{session_id}")
-async def get_session(
-    session_id: str,
-    current_user: dict = Depends(get_current_user)
-):
-    """Get chat session messages.
-
-    Args:
-        session_id: Session ID
-        current_user: Authenticated user
-
-    Returns:
-        Session with messages
-    """
-    response = supabase.table("chat_sessions").select("*").eq(
-        "session_id", session_id
-    ).eq("user_id", current_user["user_id"]).execute()
-
-    if not response.data:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Session not found"
-        )
-
-    return {
-        "success": True,
-        "session": response.data[0]
-    }

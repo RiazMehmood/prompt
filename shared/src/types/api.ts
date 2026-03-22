@@ -1,96 +1,232 @@
-"""Shared TypeScript API types matching Pydantic schemas."""
+/**
+ * Shared API types — generated from backend Pydantic schemas.
+ * Used by both frontend (Next.js) and mobile (React Native).
+ */
+
+// ============================================================
+// Enums
+// ============================================================
+
+export type SubscriptionTier = 'basic' | 'pro' | 'premium' | 'institutional';
+export type UserRole = 'user' | 'domain_admin' | 'root_admin';
+export type DomainStatus = 'active' | 'inactive';
+export type DocumentType = 'act' | 'case_law' | 'sample' | 'textbook' | 'protocol' | 'standard';
+export type DocumentStatus = 'pending' | 'approved' | 'rejected';
+export type LanguageCode = 'english' | 'urdu' | 'sindhi' | 'mixed';
+export type OutputFormat = 'in_app' | 'pdf' | 'docx';
+export type ValidationStatus = 'valid' | 'invalid' | 'pending';
+export type VoiceSessionStatus = 'recording' | 'processing' | 'completed' | 'failed';
+export type TranscriptionLanguage = 'english' | 'urdu' | 'sindhi';
+
+// ============================================================
+// User / Auth
+// ============================================================
 
 export interface User {
-  user_id?: string;
-  tenant_id?: string;
+  id: string;
   email?: string;
-  phone_number?: string;
-  auth_method: "email" | "phone" | "google";
-  google_id?: string;
-  full_name: string;
-  role_id: string;
-  account_status: "active" | "suspended" | "deleted";
-  created_at?: string;
+  phone?: string;
+  domainId?: string;
+  subscriptionTier: SubscriptionTier;
+  role: UserRole;
+  documentGenerationCount: number;
+  uploadCount: number;
+  createdAt: string;
+  lastLoginAt?: string;
 }
 
-export interface Role {
-  role_id?: string;
-  role_name: string;
-  display_name: string;
-  category: string;
-  ai_persona_prompt: string;
-  sidebar_features: string[];
-  created_at?: string;
+export interface RegisterRequest {
+  email?: string;
+  phone?: string;
+  password: string;
 }
 
-export interface Admin {
-  admin_id?: string;
-  user_id: string;
-  admin_type: "root" | "domain" | "support";
-  permissions: Record<string, boolean>;
-  created_at?: string;
-  is_active: boolean;
+export interface LoginRequest {
+  email?: string;
+  phone?: string;
+  password: string;
+}
+
+export interface LoginResponse {
+  accessToken: string;
+  refreshToken: string;
+  user: User;
+  expiresIn: number;
+}
+
+export interface VerifyEmailRequest {
+  email: string;
+  code: string;
+}
+
+export interface VerifyPhoneRequest {
+  phone: string;
+  code: string;
+}
+
+export interface RefreshTokenRequest {
+  refreshToken: string;
+}
+
+// ============================================================
+// Domain
+// ============================================================
+
+export interface Domain {
+  id: string;
+  name: string;
+  description?: string;
+  iconUrl?: string;
+  status: DomainStatus;
+  configuration: Record<string, unknown>;
+  knowledgeBaseNamespace: string;
+  createdAt: string;
+}
+
+// ============================================================
+// Template
+// ============================================================
+
+export interface SlotDefinition {
+  name: string;
+  type: 'text' | 'date' | 'number' | 'list';
+  required: boolean;
+  dataSource: 'user_input' | 'rag_retrieval';
+}
+
+export interface Template {
+  id: string;
+  name: string;
+  domainId: string;
+  description?: string;
+  content: string;
+  slotDefinitions: SlotDefinition[];
+  formattingRules: Record<string, unknown>;
+  version: string;
+  isActive: boolean;
+  createdAt: string;
+}
+
+// ============================================================
+// Document (Knowledge Base)
+// ============================================================
+
+export interface OcrFlaggedPage {
+  pageNum: number;
+  confidence: number;
+  reason: string;
 }
 
 export interface Document {
-  document_id?: string;
-  title: string;
-  content: string;
-  category: string;
-  role_id: string;
-  status: "pending" | "approved" | "rejected";
-  file_url?: string;
-  metadata?: Record<string, any>;
-  created_at?: string;
+  id: string;
+  filename: string;
+  fileSizeBytes: number;
+  mimeType: string;
+  domainId: string;
+  documentType: DocumentType;
+  metadata: Record<string, unknown>;
+  status: DocumentStatus;
+  approvalNotes?: string;
+  uploadedBy: string;
+  ocrProcessed: boolean;
+  ocrConfidenceAvg?: number;
+  ocrFlaggedPages?: OcrFlaggedPage[];
+  detectedLanguage?: LanguageCode;
+  createdAt: string;
 }
 
-export interface ChatMessage {
-  role: "user" | "assistant";
-  content: string;
-  timestamp: string;
-  citations?: string[];
-  confidence?: number;
-}
+// ============================================================
+// Generated Document
+// ============================================================
 
-export interface ChatSession {
-  session_id?: string;
-  user_id: string;
-  role_id: string;
-  messages: ChatMessage[];
-  created_at?: string;
-  last_active?: string;
+export interface RagSource {
+  sourceId: string;
+  text: string;
+  confidence: number;
+  page?: number;
 }
 
 export interface GeneratedDocument {
-  generated_id?: string;
-  user_id: string;
-  document_type: string;
-  content: string;
-  file_url?: string;
-  created_at?: string;
+  id: string;
+  userId: string;
+  templateId: string;
+  domainId: string;
+  inputParameters: Record<string, unknown>;
+  retrievedSources: RagSource[];
+  outputContent: string;
+  outputLanguage: LanguageCode;
+  outputFormat: OutputFormat;
+  validationStatus: ValidationStatus;
+  validationErrors?: Record<string, unknown>;
+  createdAt: string;
 }
 
-export interface ErrorResponse {
-  error: string;
+// ============================================================
+// Conversation (multilingual text input)
+// ============================================================
+
+export interface ConversationRequest {
   message: string;
-  details?: Record<string, any>;
+  language: LanguageCode;
+  domainId: string;
+  sessionId?: string;
 }
 
-export interface SuccessResponse<T> {
-  success: boolean;
-  data: T;
-  message?: string;
+export interface ConversationResponse {
+  reply: string;
+  language: LanguageCode;
+  sources: RagSource[];
+  sessionId: string;
 }
 
-export interface PaginationParams {
-  page: number;
-  page_size: number;
+// ============================================================
+// Voice (Phase 2 — Pilot)
+// ============================================================
+
+export interface VoiceTranscribeResponse {
+  sessionId: string;
+  transcriptionText: string;
+  language: TranscriptionLanguage;
+  confidence: number;
+  status: VoiceSessionStatus;
+}
+
+export interface SpeechSynthesisRequest {
+  text: string;
+  language: TranscriptionLanguage;
+  sessionId?: string;
+}
+
+// ============================================================
+// Subscription
+// ============================================================
+
+export interface Subscription {
+  id: string;
+  userId: string;
+  tier: SubscriptionTier;
+  status: 'active' | 'expired' | 'cancelled';
+  startDate: string;
+  expiryDate: string;
+  currency: string;
+  amountPaid?: number;
+}
+
+// ============================================================
+// API Common
+// ============================================================
+
+export interface ApiError {
+  code: string;
+  message: string;
+  requestId?: string;
+  details?: unknown;
 }
 
 export interface PaginatedResponse<T> {
   items: T[];
   total: number;
   page: number;
-  page_size: number;
-  total_pages: number;
+  pageSize: number;
+  hasMore: boolean;
 }

@@ -211,6 +211,8 @@ See `.specify/memory/constitution.md` for code quality, testing, performance, se
 
 ## Active Technologies
 - Python 3.11 (Backend), TypeScript 5.x (Frontend) (001-domain-adaptive-platform)
+- Python 3.11 (Backend), TypeScript 5.x (Frontend), Swift/Kotlin (Mobile Native Modules) + FastAPI, LangGraph, Pydantic, Supabase Client, React Native, Next.js, ChromaDB, multilingual-e5-base (Sentence Transformers), Tesseract/EasyOCR, OpenAI Whisper API (Phase 2 voice), Google Cloud TTS (Phase 3 voice) (001-rag-document-intelligence)
+- PostgreSQL (Supabase), ChromaDB (vector store), local file system (PDF/audio temp storage) (001-rag-document-intelligence)
 
 ## Recent Changes
 - 001-domain-adaptive-platform: Added Python 3.11 (Backend), TypeScript 5.x (Frontend)

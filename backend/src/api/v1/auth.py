@@ -1,237 +1,74 @@
-"""Authentication API router."""
-from fastapi import APIRouter, HTTPException, status, Depends
-from pydantic import BaseModel, EmailStr
-from jose import jwt
-from datetime import datetime, timedelta
-from backend.src.config import settings
-from backend.src.services.auth.email_auth import EmailAuthService
-from backend.src.services.auth.phone_auth import PhoneAuthService
-from backend.src.services.auth.oauth import OAuthService
-from backend.src.services.subscriptions.trial import TrialService
-from backend.src.api.dependencies import get_current_user
+"""Auth API router — registration, login, verification, token refresh."""
+from typing import Annotated
 
-router = APIRouter(prefix="/auth", tags=["authentication"])
+from fastapi import APIRouter, Body, status
+from fastapi.responses import JSONResponse
 
+from src.models.user import (
+    LoginResponse,
+    RefreshTokenRequest,
+    UserRegistration,
+    UserLogin,
+    VerifyEmailRequest,
+    VerifyPhoneRequest,
+)
+from src.services.auth.email_auth import EmailAuthService
+from src.services.auth.phone_auth import PhoneAuthService
 
-# Request/Response models
-class EmailSignupRequest(BaseModel):
-    email: EmailStr
-    password: str
-    full_name: str
-    role_id: str
+router = APIRouter()
 
 
-class EmailVerifyRequest(BaseModel):
-    email: EmailStr
-    code: str
+@router.post("/register", status_code=status.HTTP_201_CREATED)
+async def register(body: UserRegistration) -> JSONResponse:
+    """Register a new user with email or phone.
+
+    - Email registration: sends a verification email via Supabase Auth
+    - Phone registration: sends an OTP SMS via Twilio
+    """
+    if body.email:
+        svc = EmailAuthService()
+        result = await svc.register(body.email, body.password)
+        return JSONResponse(status_code=201, content=result)
+    else:
+        svc = PhoneAuthService()
+        result = await svc.send_otp(body.phone)  # type: ignore[arg-type]
+        return JSONResponse(status_code=201, content=result)
 
 
-class EmailLoginRequest(BaseModel):
-    email: EmailStr
-    password: str
+@router.post("/login", response_model=LoginResponse)
+async def login(body: UserLogin) -> LoginResponse:
+    """Authenticate with email+password or initiate phone OTP flow."""
+    if body.email and body.password:
+        svc = EmailAuthService()
+        return await svc.login(body.email, body.password)
+    raise ValueError("Email and password are required for login")
 
 
-class PhoneSignupRequest(BaseModel):
-    phone: str
-    full_name: str
-    role_id: str
+@router.post("/verify-email")
+async def verify_email(body: VerifyEmailRequest) -> JSONResponse:
+    """Verify email with OTP code."""
+    svc = EmailAuthService()
+    await svc.verify_email(body.email, body.code)
+    return JSONResponse(content={"message": "Email verified successfully"})
 
 
-class PhoneVerifyRequest(BaseModel):
-    phone: str
-    otp: str
+@router.post("/verify-phone", response_model=LoginResponse)
+async def verify_phone(body: VerifyPhoneRequest) -> LoginResponse:
+    """Verify phone OTP and receive JWT tokens."""
+    svc = PhoneAuthService()
+    return await svc.verify_otp(body.phone, body.code)
 
 
-class PhoneLoginRequest(BaseModel):
-    phone: str
+@router.post("/send-phone-otp")
+async def send_phone_otp(phone: Annotated[str, Body(embed=True)]) -> JSONResponse:
+    """Send an OTP to the given phone number (used for login/registration)."""
+    svc = PhoneAuthService()
+    result = await svc.send_otp(phone)
+    return JSONResponse(content=result)
 
 
-class GoogleAuthRequest(BaseModel):
-    token: str
-    role_id: str
-
-
-class TokenResponse(BaseModel):
-    access_token: str
-    token_type: str
-    user: dict
-
-
-def create_access_token(user_id: str) -> str:
-    """Create JWT access token."""
-    expire = datetime.utcnow() + timedelta(days=7)
-    to_encode = {
-        "sub": user_id,
-        "exp": expire
-    }
-    return jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm="HS256")
-
-
-@router.post("/signup/email")
-async def signup_email(request: EmailSignupRequest):
-    """Sign up with email and password."""
-    result = await EmailAuthService.signup(
-        email=request.email,
-        password=request.password,
-        full_name=request.full_name,
-        role_id=request.role_id
-    )
-
-    if not result["success"]:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=result
-        )
-
-    return result
-
-
-@router.post("/verify/email", response_model=TokenResponse)
-async def verify_email(request: EmailVerifyRequest):
-    """Verify email code and create account."""
-    result = await EmailAuthService.verify_and_create_account(
-        email=request.email,
-        code=request.code
-    )
-
-    if not result["success"]:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=result
-        )
-
-    user = result["user"]
-
-    # Activate trial subscription
-    await TrialService.activate_trial(user["user_id"])
-
-    # Generate JWT token
-    access_token = create_access_token(user["user_id"])
-
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "user": user
-    }
-
-
-@router.post("/login", response_model=TokenResponse)
-async def login_email(request: EmailLoginRequest):
-    """Login with email and password."""
-    result = await EmailAuthService.login(
-        email=request.email,
-        password=request.password
-    )
-
-    if not result["success"]:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=result
-        )
-
-    user = result["user"]
-    access_token = create_access_token(user["user_id"])
-
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "user": user
-    }
-
-
-@router.post("/signup/phone")
-async def signup_phone(request: PhoneSignupRequest):
-    """Sign up with phone number."""
-    result = await PhoneAuthService.signup(
-        phone=request.phone,
-        full_name=request.full_name,
-        role_id=request.role_id
-    )
-
-    if not result["success"]:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=result
-        )
-
-    return result
-
-
-@router.post("/verify/phone", response_model=TokenResponse)
-async def verify_phone(request: PhoneVerifyRequest):
-    """Verify phone OTP and create account."""
-    result = await PhoneAuthService.verify_and_create_account(
-        phone=request.phone,
-        otp=request.otp
-    )
-
-    if not result["success"]:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=result
-        )
-
-    user = result["user"]
-
-    # Activate trial subscription
-    await TrialService.activate_trial(user["user_id"])
-
-    # Generate JWT token
-    access_token = create_access_token(user["user_id"])
-
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "user": user
-    }
-
-
-@router.post("/signup/google", response_model=TokenResponse)
-async def signup_google(request: GoogleAuthRequest):
-    """Sign up or login with Google OAuth."""
-    result = await OAuthService.signup_or_login(
-        token=request.token,
-        role_id=request.role_id
-    )
-
-    if not result["success"]:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=result
-        )
-
-    user = result["user"]
-
-    # Activate trial for new users
-    if result.get("is_new_user"):
-        await TrialService.activate_trial(user["user_id"])
-
-    # Generate JWT token
-    access_token = create_access_token(user["user_id"])
-
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "user": user
-    }
-
-
-@router.get("/me")
-async def get_current_user_info(current_user: dict = Depends(get_current_user)):
-    """Get current authenticated user info."""
-    return {
-        "success": True,
-        "user": current_user
-    }
-
-
-@router.post("/refresh", response_model=TokenResponse)
-async def refresh_token(current_user: dict = Depends(get_current_user)):
-    """Refresh JWT token."""
-    access_token = create_access_token(current_user["user_id"])
-
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "user": current_user
-    }
+@router.post("/refresh", response_model=LoginResponse)
+async def refresh_token(body: RefreshTokenRequest) -> LoginResponse:
+    """Exchange a refresh token for a new access token."""
+    svc = EmailAuthService()
+    return await svc.refresh_token(body.refresh_token)

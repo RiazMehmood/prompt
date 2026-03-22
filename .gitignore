@@ -1,41 +1,122 @@
-# Dependencies
-node_modules/
+# ============================================================
+# Python / Backend
+# ============================================================
 __pycache__/
-*.pyc
-.venv/
-venv/
-
-# Build outputs
-dist/
+*.py[cod]
+*$py.class
+*.so
+.Python
 build/
-.next/
-.expo/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
 *.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+.env
+.venv
+venv/
+env/
+ENV/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
 
-# Environment variables
+# ============================================================
+# Node / Frontend / Mobile
+# ============================================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnp
+.pnp.js
+.next/
+out/
+.nuxt/
+dist/
+.cache/
+.parcel-cache/
+*.tsbuildinfo
+
+# ============================================================
+# React Native / Mobile
+# ============================================================
+.expo/
+.expo-shared/
+web-build/
+android/
+ios/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+buck-out/
+\.buckd/
+*.keystore
+!debug.keystore
+
+# ============================================================
+# Environment & Secrets
+# ============================================================
 .env
 .env.local
-.env.*.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env*.local
+!.env.example
+!.env.local.example
 
-# IDE
+# ============================================================
+# Data directories (local dev only)
+# ============================================================
+backend/data/chromadb/
+backend/data/voice_temp/
+backend/data/uploads/
+
+# ============================================================
+# OS / Editor
+# ============================================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
 
-# OS
-.DS_Store
-Thumbs.db
-
+# ============================================================
 # Logs
+# ============================================================
+logs/
 *.log
 npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
 
-# Testing
+# ============================================================
+# Testing artifacts
+# ============================================================
 coverage/
-.pytest_cache/
-
-# Vercel
-.vercel
+.nyc_output/
+test-results/

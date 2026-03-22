@@ -1,79 +1,64 @@
-"use client";
+'use client';
+import { useEffect } from 'react';
+import { useRouter, usePathname } from 'next/navigation';
+import Link from 'next/link';
 
-import { useAuthStore } from "shared/stores/authStore";
-import { useRouter } from "next/navigation";
-import { useEffect } from "react";
+const navLinks = [
+  { href: '/dashboard', label: 'Overview' },
+  { href: '/admin/documents', label: 'Document Queue' },
+  { href: '/admin/templates', label: 'Templates' },
+  { href: '/admin/domains', label: 'Domains' },
+];
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
-  const user = useAuthStore((state) => state.user);
+  const pathname = usePathname();
 
   useEffect(() => {
-    if (!isAuthenticated) {
-      router.push("/login");
-    }
-  }, [isAuthenticated, router]);
+    const token = localStorage.getItem('admin_token');
+    if (!token) router.replace('/login');
+  }, [router]);
 
-  if (!isAuthenticated) {
-    return null;
-  }
+  const handleLogout = () => {
+    localStorage.removeItem('admin_token');
+    localStorage.removeItem('admin_user');
+    router.replace('/login');
+  };
 
   return (
-    <div className="flex min-h-screen">
+    <div className="flex min-h-screen bg-gray-50">
       {/* Sidebar */}
-      <aside className="w-64 border-r bg-gray-50 p-4">
-        <div className="mb-8">
-          <h2 className="text-xl font-bold">Domain-Adaptive</h2>
-          <p className="text-sm text-muted-foreground">Lawyer Portal</p>
+      <aside className="w-64 bg-gray-900 text-white flex flex-col">
+        <div className="p-6 border-b border-gray-700">
+          <h1 className="text-xl font-bold">Prompt Admin</h1>
         </div>
-
-        <nav className="space-y-2">
-          <a
-            href="/dashboard"
-            className="block rounded-md px-3 py-2 hover:bg-gray-100"
-          >
-            Home
-          </a>
-          <a
-            href="/dashboard/chat"
-            className="block rounded-md px-3 py-2 hover:bg-gray-100"
-          >
-            Chat
-          </a>
-          <a
-            href="/dashboard/documents"
-            className="block rounded-md px-3 py-2 hover:bg-gray-100"
-          >
-            Documents
-          </a>
+        <nav className="flex-1 p-4 space-y-1">
+          {navLinks.map((link) => (
+            <Link
+              key={link.href}
+              href={link.href}
+              className={`block px-4 py-2 rounded-lg text-sm transition ${
+                pathname === link.href
+                  ? 'bg-gray-700 text-white'
+                  : 'text-gray-400 hover:text-white hover:bg-gray-800'
+              }`}
+            >
+              {link.label}
+            </Link>
+          ))}
         </nav>
-
-        <div className="mt-8 rounded-md bg-blue-50 p-3">
-          <p className="text-sm font-medium">Trial Account</p>
-          <p className="text-xs text-muted-foreground">14 days remaining</p>
-          <p className="text-xs text-muted-foreground">10 documents left</p>
+        <div className="p-4 border-t border-gray-700">
+          <button
+            onClick={handleLogout}
+            className="w-full text-sm text-gray-400 hover:text-white py-2 px-4 rounded-lg hover:bg-gray-800 transition text-left"
+          >
+            Sign Out
+          </button>
         </div>
       </aside>
 
       {/* Main content */}
-      <main className="flex-1">
-        {/* Header */}
-        <header className="border-b bg-white p-4">
-          <div className="flex items-center justify-between">
-            <h1 className="text-2xl font-bold">Dashboard</h1>
-            <div className="flex items-center gap-4">
-              <span className="text-sm">{user?.full_name}</span>
-              <button className="text-sm text-muted-foreground hover:text-foreground">
-                Logout
-              </button>
-            </div>
-          </div>
-        </header>
-
-        {/* Content */}
-        <div className="p-6">{children}</div>
-      </main>
+      <main className="flex-1 p-8">{children}</main>
     </div>
   );
 }

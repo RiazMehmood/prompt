@@ -2,28 +2,27 @@
 
 <!--
 Sync Impact Report:
-Version: 1.2.0 (Universal Multi-Profession Support)
+Version: 1.2.1 (Mobile Framework Correction)
 Ratification Date: 2026-03-14
-Last Amended: 2026-03-14
+Last Amended: 2026-03-22
+
+Previous Version: 1.2.0
 
 Modified Principles:
-- Principle III: Expanded from "Legal Knowledge" to "Professional Knowledge" (all domains)
-- Principle VI: Expanded from "Pakistani Legal Domain Specificity" to "Domain-Specific Knowledge Boundaries" (extensible to unlimited professions)
+- Principle IV: Corrected "Mobile (Expo)" to "Mobile (React Native bare)" — Expo is not used
+- Frontend Standards: Corrected "Expo (Mobile)" references to "React Native" throughout
 
-Added Sections: None (enhanced existing principles)
+Added Sections: None
 Removed Sections: None
 
-Major Changes:
-- Platform now supports unlimited professional roles through admin configuration
-- Dynamic role system replaces fixed roles (lawyer, teacher, officer)
-- Admin can create new roles with custom categories, AI personas, and document sets
-- Constitution principles now apply universally across all professional domains
+Version Bump Rationale: PATCH — corrected incorrect mobile framework reference (Expo → React Native bare).
+The project spec explicitly requires React Native bare (not Expo). Three occurrences updated.
 
 Templates Requiring Updates:
-✅ spec-template.md - Updated for dynamic role system
-✅ plan-template.md - Constitution Check section references this file
-✅ tasks-template.md - Task categorization aligns with principles
-⚠ Command files - No command files found in .specify/templates/commands/
+✅ spec-template.md - No Expo references found
+✅ plan-template.md - No Expo references found
+✅ tasks-template.md - No Expo references found
+✅ constitution.md - All 3 Expo references corrected to React Native
 
 Follow-up TODOs: None
 -->
@@ -83,7 +82,7 @@ All user-contributed documents (legal case law, educational materials, governmen
 
 ### IV. Strict Typing and API Contracts
 
-All FastAPI endpoints MUST use Pydantic models for request/response validation. Mobile (Expo) and Web (Next.js) clients MUST have TypeScript interfaces generated from these models. No implicit data structures or "any" types in client code.
+All FastAPI endpoints MUST use Pydantic models for request/response validation. Mobile (React Native bare) and Web (Next.js) clients MUST have TypeScript interfaces generated from these models. No implicit data structures or "any" types in client code.
 
 **Rationale**: Multi-platform development (Web + Mobile) requires ironclad contracts. Type mismatches cause runtime crashes in production. Pydantic validation catches malformed requests at the API boundary, preventing downstream errors in LangGraph workflows.
 
@@ -100,19 +99,23 @@ All FastAPI endpoints MUST use Pydantic models for request/response validation. 
 
 ### V. Cost-Conscious Architecture
 
-All infrastructure MUST run on free tiers: Supabase Free (500MB DB, 50MB file storage), Render Free (750 hours/month), Gemini 1.5 Flash or Groq (free API tiers). Paid services require explicit justification and user approval.
+All infrastructure MUST run on zero-cost or free tiers: Supabase Free (PostgreSQL), ChromaDB (Local), Sentence-Transformers (Local), and Gemini Free (API Key Rotation). Paid services are strictly avoided for the MVP.
 
-**Rationale**: Early-stage legal tech in Pakistan cannot assume venture funding. Free-tier constraints force architectural discipline (efficient embeddings, query optimization, caching) that scales better than throwing money at infrastructure.
+**Rationale**: Early-stage professional tech in Pakistan requires $0/month API token costs. Local embeddings and local vector storage enable unlimited scaling on minimal hardware ($10-$20/month flat server cost) without per-token charges for RAG.
 
 **Testability Criteria**:
-- [ ] Monitoring dashboard tracks free-tier usage (DB size, API calls, bandwidth)
+- [ ] RAG system uses local ChromaDB for vector storage
+- [ ] Embeddings generated locally via Sentence-Transformers (all-MiniLM-L6-v2)
+- [ ] AI Key Rotator automatically switches keys on 429 Resource Exhausted errors
+- [ ] Semantic cache (Similarity > 0.92) serves answers instantly without API usage
+- [ ] Monitoring dashboard tracks free-tier usage (DB size, key rotation frequency)
 - [ ] Alerts trigger at 80% of free-tier limits
-- [ ] Embedding strategy uses efficient models (e.g., text-embedding-3-small: 1536 dims)
-- [ ] Query caching reduces redundant API calls (cache common legal queries)
 
 **Failure Modes to Prevent**:
-- Unoptimized embeddings exhausting storage (chunk size: 512 tokens max, overlap: 50 tokens)
-- Redundant API calls to LLM (cache responses for identical queries with TTL: 24h)
+- Hardcoded single Gemini key causing downtime on quota limit (use Key Rotator)
+- Paid OpenAI/Gemini embedding tokens (use local Sentence-Transformers)
+- Heavy Postgres pgvector infrastructure (use local-first ChromaDB)
+- Missing semantic cache causing redundant expensive LLM calls
 - Large file uploads exceeding storage (enforce 10MB limit per document, compress PDFs)
 
 ### VI. Domain-Specific Knowledge Boundaries
@@ -167,12 +170,13 @@ Complex legal tasks (bail application drafting, case research) MUST use LangGrap
 
 ### Database Design
 
-- **Supabase Postgres with pgvector**: All embeddings stored in `vector(1536)` columns for semantic search
+- **Local ChromaDB with Sentence-Transformers**: All embeddings generated using `all-MiniLM-L6-v2` and stored in local ChromaDB for zero-cost semantic search
 - **RLS Policies**: Every table with user data MUST have RLS enabled with policies checking `auth.uid()` or `tenant_id`
 - **Metadata JSONB**: Legal document metadata (type: 'act'|'case_law'|'sample', section, court, date, jurisdiction) stored as JSONB for flexible querying
 - **Status Enums**: Document approval workflow uses `status: 'pending'|'approved'|'rejected'` enum
-- **Indexes**: Create GIN indexes on JSONB metadata fields and IVFFlat indexes on vector columns (lists=100 for <1M rows)
+- **Indexes**: Create GIN indexes on JSONB metadata fields
 - **Audit Tables**: All data modifications logged to `audit_log` table (user_id, tenant_id, table_name, action, old_value, new_value, timestamp)
+- **Gemini Key Rotation**: All AI calls MUST pass through the Gemini API Key Rotator to prevent rate limiting on free tiers
 
 ### API Design
 
@@ -185,7 +189,7 @@ Complex legal tasks (bail application drafting, case research) MUST use LangGrap
 
 ### Frontend Standards
 
-- **Shared React Hooks**: `useChat`, `useDocumentUpload`, `useLegalSearch` work in both Next.js (Web) and Expo (Mobile)
+- **Shared React Hooks**: `useChat`, `useDocumentUpload`, `useLegalSearch` work in both Next.js (Web) and React Native (Mobile)
 - **Tailwind/NativeWind**: Shared styling system with platform-specific overrides only when necessary
 - **Lucide Icons**: Use `lucide-react` (Web) and `lucide-react-native` (Mobile) with consistent icon names
 - **TypeScript Strict Mode**: No `any` types, all API responses typed from Pydantic models
@@ -210,10 +214,12 @@ Complex legal tasks (bail application drafting, case research) MUST use LangGrap
 - Setup Supabase project with RLS policies for all tables
 - Create `profiles`, `documents`, `workflows`, `audit_log` tables with proper indexes
 - Implement JWT authentication flow (Supabase Auth with email/password)
-- Build document ingestion pipeline (PDF → text extraction → chunking → embeddings → pgvector)
+- Setup Local ChromaDB with Sentence-Transformers (`all-MiniLM-L6-v2`)
+- Build document ingestion pipeline (PDF → text extraction → chunking → local embeddings → ChromaDB)
+- Implement Gemini API Key Rotator for rate-limit management
 - Create FastAPI base structure with Pydantic models and error handling
 - Setup monitoring for free-tier usage (DB size, API calls, bandwidth)
-- Configure CORS for Web (Next.js) and Mobile (Expo) origins
+- Configure CORS for Web (Next.js) and Mobile (React Native) origins
 
 ### Phase 2: User Stories (Independent)
 
@@ -378,7 +384,7 @@ This constitution supersedes all other development practices. Any feature that v
 - Manual review required for complexity justifications
 - Quarterly constitution review to identify outdated principles
 
-**Version**: 1.2.0 | **Ratified**: 2026-03-14 | **Last Amended**: 2026-03-14
+**Version**: 1.2.1 | **Ratified**: 2026-03-14 | **Last Amended**: 2026-03-22
 
 ---
 

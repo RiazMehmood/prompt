@@ -1,196 +1,143 @@
-"""Email authentication service with signup and verification."""
-import secrets
-import hashlib
-from datetime import datetime, timedelta
+"""EmailAuthService: register, verify OTP, login via Supabase Auth."""
+import random
+import string
+from datetime import datetime, timedelta, timezone
 from typing import Optional
-from passlib.context import CryptContext
-from backend.src.db.supabase_client import supabase
-from backend.src.db.redis import redis_client
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+import structlog
+
+from src.config import settings
+from src.db.supabase_client import get_supabase_admin, get_supabase_client
+from src.models.user import LoginResponse, UserProfile
+
+logger = structlog.get_logger(__name__)
+
+_OTP_LENGTH = 6
+_OTP_EXPIRY_MINUTES = 10
+
+
+def _generate_otp() -> str:
+    return "".join(random.choices(string.digits, k=_OTP_LENGTH))
 
 
 class EmailAuthService:
-    """Email authentication service with OTP verification."""
+    """Handles email-based registration, OTP verification, and login.
 
-    @staticmethod
-    def hash_password(password: str) -> str:
-        """Hash password using bcrypt."""
-        return pwd_context.hash(password)
+    Uses Supabase Auth for JWT issuance and session management.
+    OTP codes are stored temporarily in the profiles table.
+    """
 
-    @staticmethod
-    def verify_password(plain_password: str, hashed_password: str) -> bool:
-        """Verify password against hash."""
-        return pwd_context.verify(plain_password, hashed_password)
+    def __init__(self) -> None:
+        self._client = get_supabase_client()
+        self._admin = get_supabase_admin()
 
-    @staticmethod
-    async def generate_verification_code() -> str:
-        """Generate 6-digit verification code."""
-        return str(secrets.randbelow(900000) + 100000)
+    async def register(self, email: str, password: str) -> dict:
+        """Register a new user via Supabase Auth (sends verification email)."""
+        try:
+            response = self._client.auth.sign_up({"email": email, "password": password})
+            if response.user is None:
+                raise ValueError("Registration failed — no user returned")
+            logger.info("user_registered", email=email[:3] + "***")
+            return {"message": "Verification email sent", "user_id": response.user.id}
+        except Exception as exc:
+            logger.error("registration_failed", error=str(exc))
+            raise ValueError(f"Registration failed: {exc}") from exc
 
-    @staticmethod
-    async def send_verification_email(email: str, code: str) -> bool:
-        """Send verification code via email.
+    async def send_otp(self, email: str) -> None:
+        """Send an OTP code for email verification (used for custom OTP flow)."""
+        otp = _generate_otp()
+        expires = datetime.now(timezone.utc) + timedelta(minutes=_OTP_EXPIRY_MINUTES)
+        # Store OTP in profiles table
+        self._admin.table("profiles").update(
+            {"verification_code": otp, "verification_expires": expires.isoformat()}
+        ).eq("email", email).execute()
+        # In production: send via email service (SendGrid, SES, etc.)
+        logger.info("otp_sent", email=email[:3] + "***", expires_at=expires.isoformat())
 
-        Note: For MVP, we'll store in Redis. In production, integrate with email service.
-        """
-        # Store code in Redis with 10-minute expiry
-        key = f"email_verification:{email}"
-        await redis_client.setex(key, 600, code)  # 10 minutes
+    async def verify_email(self, email: str, code: str) -> bool:
+        """Verify an email OTP code."""
+        result = self._admin.table("profiles").select(
+            "verification_code, verification_expires"
+        ).eq("email", email).single().execute()
 
-        # TODO: Integrate with email service (SendGrid, AWS SES, etc.)
-        print(f"[EMAIL] Verification code for {email}: {code}")
-        return True
+        if not result.data:
+            raise ValueError("User not found")
 
-    @staticmethod
-    async def signup(
-        email: str,
-        password: str,
-        full_name: str,
-        role_id: str
-    ) -> dict:
-        """Initiate email signup with verification code.
-
-        Args:
-            email: User email address
-            password: Plain text password
-            full_name: User's full name
-            role_id: Role ID (default: lawyer)
-
-        Returns:
-            dict with success status and message
-        """
-        # Check if email already exists
-        response = supabase.table("users").select("user_id").eq("email", email).execute()
-        if response.data:
-            return {
-                "success": False,
-                "error": "EMAIL_EXISTS",
-                "message": "Email already registered"
-            }
-
-        # Generate verification code
-        code = await EmailAuthService.generate_verification_code()
-
-        # Store pending signup data in Redis (10-minute expiry)
-        signup_key = f"pending_signup:{email}"
-        signup_data = {
-            "email": email,
-            "password_hash": EmailAuthService.hash_password(password),
-            "full_name": full_name,
-            "role_id": role_id,
-            "auth_method": "email"
-        }
-
-        import json
-        await redis_client.setex(signup_key, 600, json.dumps(signup_data))
-
-        # Send verification email
-        await EmailAuthService.send_verification_email(email, code)
-
-        return {
-            "success": True,
-            "message": "Verification code sent to email",
-            "email": email
-        }
-
-    @staticmethod
-    async def verify_and_create_account(email: str, code: str) -> dict:
-        """Verify code and create user account.
-
-        Args:
-            email: User email address
-            code: 6-digit verification code
-
-        Returns:
-            dict with user data or error
-        """
-        # Verify code
-        verification_key = f"email_verification:{email}"
-        stored_code = await redis_client.get(verification_key)
+        stored_code = result.data.get("verification_code")
+        expires_str = result.data.get("verification_expires")
 
         if not stored_code or stored_code != code:
-            return {
-                "success": False,
-                "error": "INVALID_CODE",
-                "message": "Invalid or expired verification code"
-            }
+            raise ValueError("Invalid verification code")
 
-        # Get pending signup data
-        signup_key = f"pending_signup:{email}"
-        signup_data_json = await redis_client.get(signup_key)
+        if expires_str:
+            expires = datetime.fromisoformat(expires_str)
+            if datetime.now(timezone.utc) > expires:
+                raise ValueError("Verification code has expired")
 
-        if not signup_data_json:
-            return {
-                "success": False,
-                "error": "SIGNUP_EXPIRED",
-                "message": "Signup session expired. Please try again."
-            }
+        # Clear OTP after successful verification
+        self._admin.table("profiles").update(
+            {"verification_code": None, "verification_expires": None}
+        ).eq("email", email).execute()
+        logger.info("email_verified", email=email[:3] + "***")
+        return True
 
-        import json
-        signup_data = json.loads(signup_data_json)
-
-        # Create user account
+    async def login(self, email: str, password: str) -> LoginResponse:
+        """Authenticate and return JWT tokens."""
         try:
-            response = supabase.table("users").insert(signup_data).execute()
-            user = response.data[0]
+            response = self._client.auth.sign_in_with_password(
+                {"email": email, "password": password}
+            )
+            if response.user is None or response.session is None:
+                raise ValueError("Invalid credentials")
 
-            # Clean up Redis keys
-            await redis_client.delete(verification_key)
-            await redis_client.delete(signup_key)
+            # Update last_login_at
+            self._admin.table("profiles").update(
+                {"last_login_at": datetime.now(timezone.utc).isoformat()}
+            ).eq("id", response.user.id).execute()
 
-            return {
-                "success": True,
-                "user": user
-            }
+            profile_data = self._admin.table("profiles").select("*").eq(
+                "id", response.user.id
+            ).single().execute()
 
-        except Exception as e:
-            return {
-                "success": False,
-                "error": "ACCOUNT_CREATION_FAILED",
-                "message": str(e)
-            }
+            profile = UserProfile(
+                id=response.user.id,
+                email=response.user.email,
+                **{k: v for k, v in (profile_data.data or {}).items()
+                   if k not in ("id", "email")},
+            )
+            logger.info("user_logged_in", user_id=response.user.id)
+            return LoginResponse(
+                access_token=response.session.access_token,
+                refresh_token=response.session.refresh_token,
+                expires_in=3600,
+                user=profile,
+            )
+        except Exception as exc:
+            logger.warning("login_failed", error=str(exc))
+            raise ValueError("Invalid email or password") from exc
 
-    @staticmethod
-    async def login(email: str, password: str) -> dict:
-        """Login with email and password.
+    async def refresh_token(self, refresh_token: str) -> LoginResponse:
+        """Exchange refresh token for a new access token."""
+        try:
+            response = self._client.auth.refresh_session(refresh_token)
+            if response.session is None or response.user is None:
+                raise ValueError("Invalid refresh token")
 
-        Args:
-            email: User email address
-            password: Plain text password
+            profile_data = self._admin.table("profiles").select("*").eq(
+                "id", response.user.id
+            ).single().execute()
 
-        Returns:
-            dict with user data or error
-        """
-        # Fetch user
-        response = supabase.table("users").select("*").eq("email", email).execute()
-
-        if not response.data:
-            return {
-                "success": False,
-                "error": "INVALID_CREDENTIALS",
-                "message": "Invalid email or password"
-            }
-
-        user = response.data[0]
-
-        # Verify password
-        if not EmailAuthService.verify_password(password, user["password_hash"]):
-            return {
-                "success": False,
-                "error": "INVALID_CREDENTIALS",
-                "message": "Invalid email or password"
-            }
-
-        # Check account status
-        if user["account_status"] != "active":
-            return {
-                "success": False,
-                "error": "ACCOUNT_SUSPENDED",
-                "message": f"Account is {user['account_status']}"
-            }
-
-        return {
-            "success": True,
-            "user": user
-        }
+            profile = UserProfile(
+                id=response.user.id,
+                email=response.user.email,
+                **{k: v for k, v in (profile_data.data or {}).items()
+                   if k not in ("id", "email")},
+            )
+            return LoginResponse(
+                access_token=response.session.access_token,
+                refresh_token=response.session.refresh_token,
+                expires_in=3600,
+                user=profile,
+            )
+        except Exception as exc:
+            raise ValueError("Token refresh failed") from exc

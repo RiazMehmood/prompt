@@ -1,244 +1,125 @@
-"""Phone OTP authentication service."""
-import secrets
-import re
-from typing import Optional
-from backend.src.db.supabase_client import supabase
-from backend.src.db.redis import redis_client
+"""PhoneAuthService: phone registration and Twilio OTP for Pakistani numbers."""
+import random
+import string
+from datetime import datetime, timedelta, timezone
+
+import structlog
+
+from src.config import settings
+from src.db.supabase_client import get_supabase_admin
+from src.models.user import LoginResponse, UserProfile
+
+logger = structlog.get_logger(__name__)
+
+_OTP_LENGTH = 6
+_OTP_EXPIRY_MINUTES = 10
+
+
+def _generate_otp() -> str:
+    return "".join(random.choices(string.digits, k=_OTP_LENGTH))
 
 
 class PhoneAuthService:
-    """Phone OTP authentication service for Pakistani numbers."""
+    """Handles phone-based registration and OTP verification via Twilio.
 
-    @staticmethod
-    def validate_pakistani_phone(phone: str) -> bool:
-        """Validate Pakistani phone number format (+92-3XX-XXXXXXX).
+    Supports Pakistani mobile numbers (+92XXXXXXXXXX format).
+    """
 
-        Args:
-            phone: Phone number string
+    def __init__(self) -> None:
+        self._admin = get_supabase_admin()
+        self._twilio_client = None
+        if settings.TWILIO_ACCOUNT_SID and settings.TWILIO_AUTH_TOKEN:
+            try:
+                from twilio.rest import Client  # type: ignore[import]
+                self._twilio_client = Client(
+                    settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN
+                )
+                logger.info("twilio_client_initialized")
+            except ImportError:
+                logger.warning("twilio_not_installed")
 
-        Returns:
-            True if valid Pakistani mobile number
-        """
-        # Pakistani mobile format: +92-3XX-XXXXXXX
-        pattern = r'^\+92-3\d{2}-\d{7}$'
-        return bool(re.match(pattern, phone))
+    async def send_otp(self, phone: str) -> dict:
+        """Send a 6-digit OTP to the given phone number via Twilio SMS."""
+        otp = _generate_otp()
+        expires = datetime.now(timezone.utc) + timedelta(minutes=_OTP_EXPIRY_MINUTES)
 
-    @staticmethod
-    async def generate_otp() -> str:
-        """Generate 6-digit OTP."""
-        return str(secrets.randbelow(900000) + 100000)
-
-    @staticmethod
-    async def send_sms_otp(phone: str, otp: str) -> bool:
-        """Send OTP via SMS.
-
-        Note: For MVP, we'll store in Redis. In production, integrate with Twilio.
-        """
-        # Store OTP in Redis with 5-minute expiry
-        key = f"phone_otp:{phone}"
-        await redis_client.setex(key, 300, otp)  # 5 minutes
-
-        # TODO: Integrate with Twilio or other SMS service
-        print(f"[SMS] OTP for {phone}: {otp}")
-        return True
-
-    @staticmethod
-    async def signup(
-        phone: str,
-        full_name: str,
-        role_id: str
-    ) -> dict:
-        """Initiate phone signup with OTP.
-
-        Args:
-            phone: Pakistani phone number (+92-3XX-XXXXXXX)
-            full_name: User's full name
-            role_id: Role ID (default: lawyer)
-
-        Returns:
-            dict with success status and message
-        """
-        # Validate phone format
-        if not PhoneAuthService.validate_pakistani_phone(phone):
-            return {
-                "success": False,
-                "error": "INVALID_PHONE_FORMAT",
-                "message": "Invalid phone format. Use +92-3XX-XXXXXXX"
+        # Upsert phone record with OTP (creates profile row if first login)
+        self._admin.table("profiles").upsert(
+            {
+                "phone": phone,
+                "password_hash": "",  # phone-only users have no password
+                "verification_code": otp,
+                "verification_expires": expires.isoformat(),
             }
+        ).execute()
 
-        # Check if phone already exists
-        response = supabase.table("users").select("user_id").eq("phone_number", phone).execute()
-        if response.data:
-            return {
-                "success": False,
-                "error": "PHONE_EXISTS",
-                "message": "Phone number already registered"
+        if self._twilio_client:
+            self._twilio_client.messages.create(
+                body=f"Your Prompt verification code: {otp}. Valid for {_OTP_EXPIRY_MINUTES} minutes.",
+                from_=settings.TWILIO_PHONE_NUMBER,
+                to=phone,
+            )
+            logger.info("sms_otp_sent", phone=phone[-4:])
+        else:
+            # Dev mode: log OTP (never do this in production)
+            logger.warning("twilio_not_configured_otp_logged", otp=otp, phone=phone[-4:])
+
+        return {"message": f"OTP sent to {phone[-4:]}"}
+
+    async def verify_otp(self, phone: str, code: str) -> LoginResponse:
+        """Verify OTP and return session tokens."""
+        result = self._admin.table("profiles").select(
+            "id, verification_code, verification_expires, subscription_tier, role, "
+            "domain_id, document_generation_count, upload_count, created_at"
+        ).eq("phone", phone).single().execute()
+
+        if not result.data:
+            raise ValueError("Phone number not registered")
+
+        stored_code = result.data.get("verification_code")
+        expires_str = result.data.get("verification_expires")
+
+        if not stored_code or stored_code != code:
+            raise ValueError("Invalid OTP code")
+
+        if expires_str:
+            expires = datetime.fromisoformat(expires_str)
+            if datetime.now(timezone.utc) > expires:
+                raise ValueError("OTP has expired")
+
+        # Clear OTP + update last login
+        self._admin.table("profiles").update(
+            {
+                "verification_code": None,
+                "verification_expires": None,
+                "last_login_at": datetime.now(timezone.utc).isoformat(),
             }
+        ).eq("phone", phone).execute()
 
-        # Generate OTP
-        otp = await PhoneAuthService.generate_otp()
-
-        # Store pending signup data in Redis (5-minute expiry)
-        signup_key = f"pending_phone_signup:{phone}"
-        signup_data = {
-            "phone_number": phone,
-            "full_name": full_name,
-            "role_id": role_id,
-            "auth_method": "phone"
-        }
-
-        import json
-        await redis_client.setex(signup_key, 300, json.dumps(signup_data))
-
-        # Send SMS OTP
-        await PhoneAuthService.send_sms_otp(phone, otp)
-
-        return {
-            "success": True,
-            "message": "OTP sent to phone number",
-            "phone": phone
-        }
-
-    @staticmethod
-    async def verify_and_create_account(phone: str, otp: str) -> dict:
-        """Verify OTP and create user account.
-
-        Args:
-            phone: Phone number
-            otp: 6-digit OTP
-
-        Returns:
-            dict with user data or error
-        """
-        # Verify OTP
-        otp_key = f"phone_otp:{phone}"
-        stored_otp = await redis_client.get(otp_key)
-
-        if not stored_otp or stored_otp != otp:
-            return {
-                "success": False,
-                "error": "INVALID_OTP",
-                "message": "Invalid or expired OTP"
+        # Issue tokens via Supabase magic-link / custom token
+        # For MVP: use admin auth to generate a session
+        auth_response = self._admin.auth.admin.generate_link(
+            {
+                "type": "magiclink",
+                "email": f"{phone.replace('+', '')}@phone.prompt-platform.internal",
             }
+        )
 
-        # Get pending signup data
-        signup_key = f"pending_phone_signup:{phone}"
-        signup_data_json = await redis_client.get(signup_key)
+        profile = UserProfile(
+            id=result.data["id"],
+            phone=phone,
+            domain_id=result.data.get("domain_id"),
+            subscription_tier=result.data.get("subscription_tier", "basic"),
+            role=result.data.get("role", "user"),
+            document_generation_count=result.data.get("document_generation_count", 0),
+            upload_count=result.data.get("upload_count", 0),
+            created_at=result.data.get("created_at", datetime.now(timezone.utc)),
+        )
+        logger.info("phone_otp_verified", phone=phone[-4:])
 
-        if not signup_data_json:
-            return {
-                "success": False,
-                "error": "SIGNUP_EXPIRED",
-                "message": "Signup session expired. Please try again."
-            }
-
-        import json
-        signup_data = json.loads(signup_data_json)
-
-        # Create user account
-        try:
-            response = supabase.table("users").insert(signup_data).execute()
-            user = response.data[0]
-
-            # Clean up Redis keys
-            await redis_client.delete(otp_key)
-            await redis_client.delete(signup_key)
-
-            return {
-                "success": True,
-                "user": user
-            }
-
-        except Exception as e:
-            return {
-                "success": False,
-                "error": "ACCOUNT_CREATION_FAILED",
-                "message": str(e)
-            }
-
-    @staticmethod
-    async def login(phone: str) -> dict:
-        """Initiate phone login with OTP.
-
-        Args:
-            phone: Phone number
-
-        Returns:
-            dict with success status
-        """
-        # Validate phone format
-        if not PhoneAuthService.validate_pakistani_phone(phone):
-            return {
-                "success": False,
-                "error": "INVALID_PHONE_FORMAT",
-                "message": "Invalid phone format. Use +92-3XX-XXXXXXX"
-            }
-
-        # Check if user exists
-        response = supabase.table("users").select("user_id").eq("phone_number", phone).execute()
-        if not response.data:
-            return {
-                "success": False,
-                "error": "USER_NOT_FOUND",
-                "message": "Phone number not registered"
-            }
-
-        # Generate and send OTP
-        otp = await PhoneAuthService.generate_otp()
-        await PhoneAuthService.send_sms_otp(phone, otp)
-
-        return {
-            "success": True,
-            "message": "OTP sent to phone number",
-            "phone": phone
-        }
-
-    @staticmethod
-    async def verify_login(phone: str, otp: str) -> dict:
-        """Verify OTP and login user.
-
-        Args:
-            phone: Phone number
-            otp: 6-digit OTP
-
-        Returns:
-            dict with user data or error
-        """
-        # Verify OTP
-        otp_key = f"phone_otp:{phone}"
-        stored_otp = await redis_client.get(otp_key)
-
-        if not stored_otp or stored_otp != otp:
-            return {
-                "success": False,
-                "error": "INVALID_OTP",
-                "message": "Invalid or expired OTP"
-            }
-
-        # Fetch user
-        response = supabase.table("users").select("*").eq("phone_number", phone).execute()
-
-        if not response.data:
-            return {
-                "success": False,
-                "error": "USER_NOT_FOUND",
-                "message": "User not found"
-            }
-
-        user = response.data[0]
-
-        # Check account status
-        if user["account_status"] != "active":
-            return {
-                "success": False,
-                "error": "ACCOUNT_SUSPENDED",
-                "message": f"Account is {user['account_status']}"
-            }
-
-        # Clean up OTP
-        await redis_client.delete(otp_key)
-
-        return {
-            "success": True,
-            "user": user
-        }
+        return LoginResponse(
+            access_token=getattr(auth_response, "properties", {}).get("access_token", ""),
+            refresh_token=getattr(auth_response, "properties", {}).get("refresh_token", ""),
+            expires_in=3600,
+            user=profile,
+        )

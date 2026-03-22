@@ -1,9 +1,13 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  transpilePackages: ['@shared'],
+  images: {
+    domains: ['localhost'],
+  },
   experimental: {
-    serverActions: true,
+    serverActions: {
+      allowedOrigins: ['localhost:3000'],
+    },
   },
 }
 

@@ -1,0 +1,65 @@
+version: "3.9"
+
+# Prompt — Multi-Tenant AI-Powered RAG-Based Document Intelligence Platform
+# Local development stack: FastAPI backend + Tesseract OCR
+# ChromaDB uses the external drive path defined in backend/.env
+
+services:
+  # ─── FastAPI Backend ──────────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: prompt_backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+      # Mount external drive for ChromaDB + model caches
+      - "/media/riaz/New Volume/zero-cost setup:/mnt/data"
+    env_file:
+      - ./backend/.env
+    environment:
+      - CHROMADB_PATH=/mnt/data/chroma_data
+      - HF_HOME=/mnt/data/hf_cache
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      - tesseract
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ─── Tesseract OCR sidecar ────────────────────────────────────────────────
+  # Used only for local dev; production uses Tesseract installed in backend image
+  tesseract:
+    image: clearlinux/tesseract-ocr:latest
+    container_name: prompt_tesseract
+    restart: unless-stopped
+    # Tesseract runs as a system binary; no port needed when baked into backend image
+
+  # ─── Frontend (Next.js Admin) ─────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: prompt_frontend
+    ports:
+      - "3000:3000"
+    env_file:
+      - ./frontend/.env.local
+    environment:
+      - NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+# ─── Named volumes (for ephemeral services) ────────────────────────────────
+# ChromaDB and HuggingFace caches use bind-mounted external drive, not named volumes.
+# See CHROMADB_PATH in backend/.env.
+
+networks:
+  default:
+    name: prompt_network

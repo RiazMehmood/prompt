@@ -1,31 +1,94 @@
-"""User model for authentication and profile management."""
+"""User Pydantic models for auth request/response validation."""
 from datetime import datetime
+from enum import Enum
 from typing import Optional
-from pydantic import BaseModel, Field, EmailStr
+
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
-class User(BaseModel):
-    """User model with multi-auth support (email/phone/Google)."""
+class SubscriptionTier(str, Enum):
+    basic = "basic"
+    pro = "pro"
+    premium = "premium"
+    institutional = "institutional"
 
-    user_id: Optional[str] = Field(None, description="UUID primary key")
-    tenant_id: Optional[str] = Field(None, description="Multi-tenancy support")
-    email: Optional[EmailStr] = Field(None, description="Email address (nullable)")
-    password_hash: Optional[str] = Field(None, description="Hashed password (nullable)")
-    phone_number: Optional[str] = Field(None, description="Phone number (nullable)")
-    auth_method: str = Field(..., description="Authentication method: email|phone|google")
-    google_id: Optional[str] = Field(None, description="Google OAuth ID (nullable)")
-    full_name: str = Field(..., description="User's full name")
-    role_id: str = Field(..., description="Foreign key to roles table")
-    account_status: str = Field("active", description="Account status: active|suspended|deleted")
-    created_at: Optional[datetime] = Field(None, description="Creation timestamp")
 
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "email": "lawyer@example.com",
-                "full_name": "Ahmed Khan",
-                "auth_method": "email",
-                "role_id": "uuid-lawyer-role",
-                "account_status": "active"
-            }
-        }
+class UserRole(str, Enum):
+    user = "user"
+    domain_admin = "domain_admin"
+    root_admin = "root_admin"
+
+
+# ============================================================
+# Request models
+# ============================================================
+
+class UserRegistration(BaseModel):
+    """Registration with email OR phone (at least one required)."""
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = Field(None, pattern=r"^\+[1-9]\d{7,14}$")
+    password: str = Field(..., min_length=8, max_length=128)
+
+    @field_validator("phone", "email")
+    @classmethod
+    def strip_whitespace(cls, v: Optional[str]) -> Optional[str]:
+        return v.strip() if v else v
+
+    def model_post_init(self, __context: object) -> None:
+        if not self.email and not self.phone:
+            raise ValueError("Either email or phone is required")
+
+
+class UserLogin(BaseModel):
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = None
+    password: str
+
+    def model_post_init(self, __context: object) -> None:
+        if not self.email and not self.phone:
+            raise ValueError("Either email or phone is required")
+
+
+class VerifyEmailRequest(BaseModel):
+    email: EmailStr
+    code: str = Field(..., min_length=4, max_length=10)
+
+
+class VerifyPhoneRequest(BaseModel):
+    phone: str = Field(..., pattern=r"^\+[1-9]\d{7,14}$")
+    code: str = Field(..., min_length=4, max_length=10)
+
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str
+
+
+class DomainAssignRequest(BaseModel):
+    domain_id: str
+
+
+# ============================================================
+# Response models
+# ============================================================
+
+class UserProfile(BaseModel):
+    id: str
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    domain_id: Optional[str] = None
+    subscription_tier: SubscriptionTier
+    role: UserRole
+    document_generation_count: int
+    upload_count: int
+    created_at: datetime
+    last_login_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class LoginResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    expires_in: int  # seconds
+    user: UserProfile

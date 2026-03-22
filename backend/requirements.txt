@@ -1,40 +1,32 @@
-# Backend Dependencies for Checkpoint 1 - Free MVP
-# Stack: Vercel Serverless + Supabase Free + Gemini Flash Free
-
-# FastAPI Framework
-fastapi==0.109.0
-uvicorn[standard]==0.27.0
-python-multipart==0.0.6
-
-# LangChain for AI workflows
-langchain==0.1.0
-langchain-google-genai==0.0.6
-
-# Supabase Client
-supabase==2.3.0
-postgrest==0.13.0
-
-# Authentication
-python-jose[cryptography]==3.3.0
-passlib[bcrypt]==1.7.4
-google-auth==2.27.0
-google-auth-oauthlib==1.2.0
-
-# HTTP Client
-httpx==0.26.0
-
-# Document Generation
-python-docx==1.1.0
-
-# Pydantic for validation
-pydantic==2.5.3
-pydantic-settings==2.1.0
-
-# Environment variables
-python-dotenv==1.0.0
-
-# Redis client for Upstash
-redis==5.0.1
-
-# Utilities
-python-dateutil==2.8.2
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+python-multipart>=0.0.9
+pydantic>=2.6.0
+pydantic-settings>=2.2.0
+supabase>=2.4.0
+psycopg2-binary>=2.9.9
+asyncpg>=0.29.0
+chromadb>=0.4.22
+sentence-transformers>=2.6.0
+torch>=2.2.0
+google-generativeai>=0.5.0
+langchain>=0.1.12
+langgraph>=0.0.40
+langchain-google-genai>=1.0.1
+openai>=1.14.0
+pytesseract>=0.3.10
+easyocr>=1.7.1
+Pillow>=10.2.0
+pdf2image>=1.17.0
+python-bidi>=0.4.2
+arabic-reshaper>=3.0.0
+reportlab>=4.1.0
+python-docx>=1.1.0
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+twilio>=8.13.0
+langdetect>=1.0.9
+httpx>=0.27.0
+aiofiles>=23.2.1
+python-dotenv>=1.0.1
+structlog>=24.1.0

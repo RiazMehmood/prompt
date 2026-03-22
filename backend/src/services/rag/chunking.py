@@ -1,77 +1,140 @@
-"""Document chunking service for RAG."""
-import re
+"""DocumentChunkingService: split document text into RAG-ready chunks with metadata."""
+from typing import Any, Dict, List, Optional
+
+import structlog
+
+logger = structlog.get_logger(__name__)
+
+_DEFAULT_CHUNK_SIZE = 512   # tokens (approx characters ÷ 4)
+_DEFAULT_OVERLAP = 50       # tokens of overlap between consecutive chunks
 
 
-class ChunkingService:
-    """Document chunking service with overlap."""
+def _estimate_tokens(text: str) -> int:
+    """Rough token estimate: ~4 chars per token for multilingual text."""
+    return max(1, len(text) // 4)
 
-    @staticmethod
-    def chunk_text(
+
+def _char_limit(token_limit: int) -> int:
+    return token_limit * 4
+
+
+class DocumentChunkingService:
+    """Split approved document text into overlapping chunks suitable for embedding.
+
+    Chunk boundaries respect paragraph/sentence breaks where possible.
+    Each chunk carries metadata: source document, page number, language, section.
+    """
+
+    def __init__(
+        self,
+        chunk_size_tokens: int = _DEFAULT_CHUNK_SIZE,
+        overlap_tokens: int = _DEFAULT_OVERLAP,
+    ) -> None:
+        self._chunk_chars = _char_limit(chunk_size_tokens)
+        self._overlap_chars = _char_limit(overlap_tokens)
+
+    def chunk_document(
+        self,
         text: str,
-        chunk_size: int = 512,
-        overlap: int = 50
-    ) -> list[str]:
-        """Chunk text into overlapping segments.
+        document_id: str,
+        domain_namespace: str,
+        language: str = "english",
+        is_ocr_derived: bool = False,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Split `text` into overlapping chunks and return chunk dicts.
 
-        Args:
-            text: Text to chunk
-            chunk_size: Target chunk size in tokens (approximate)
-            overlap: Overlap size in tokens
-
-        Returns:
-            List of text chunks
+        Each returned dict has:
+          - chunk_text: str
+          - chunk_index: int
+          - document_id: str
+          - domain_namespace: str
+          - language: str
+          - is_ocr_derived: bool
+          - metadata: dict (page, section, etc.)
         """
-        # Simple word-based chunking (approximate tokens)
-        words = text.split()
-        chunks = []
+        if not text or not text.strip():
+            logger.warning("empty_document_text", document_id=document_id)
+            return []
 
-        i = 0
-        while i < len(words):
-            # Take chunk_size words
-            chunk_words = words[i:i + chunk_size]
-            chunk = " ".join(chunk_words)
-            chunks.append(chunk)
+        chunks = self._split_text(text)
+        result = []
+        base_metadata = metadata or {}
+        for i, chunk_text in enumerate(chunks):
+            result.append({
+                "chunk_text": chunk_text,
+                "chunk_index": i,
+                "document_id": document_id,
+                "domain_namespace": domain_namespace,
+                "language": language,
+                "is_ocr_derived": is_ocr_derived,
+                "metadata": {**base_metadata, "chunk_index": i},
+            })
 
-            # Move forward by (chunk_size - overlap)
-            i += (chunk_size - overlap)
+        logger.info(
+            "document_chunked",
+            document_id=document_id,
+            chunk_count=len(result),
+            language=language,
+        )
+        return result
 
-        return chunks
+    def chunk_pages(
+        self,
+        pages: List[Dict[str, Any]],
+        document_id: str,
+        domain_namespace: str,
+        base_language: str = "english",
+    ) -> List[Dict[str, Any]]:
+        """Chunk a list of page dicts (each with 'page_num', 'text', 'language', 'is_ocr').
 
-    @staticmethod
-    def chunk_by_paragraphs(text: str, max_chunk_size: int = 512) -> list[str]:
-        """Chunk text by paragraphs, respecting max size.
-
-        Args:
-            text: Text to chunk
-            max_chunk_size: Maximum chunk size in words
-
-        Returns:
-            List of text chunks
+        Per-page language overrides `base_language` if present.
         """
-        # Split by double newlines (paragraphs)
-        paragraphs = re.split(r'\n\s*\n', text)
-        chunks = []
-        current_chunk = []
-        current_size = 0
+        all_chunks = []
+        for page in pages:
+            page_text = page.get("text", "").strip()
+            if not page_text:
+                continue
+            page_lang = page.get("language", base_language)
+            page_is_ocr = page.get("is_ocr", False)
+            page_num = page.get("page_num", 0)
+            page_chunks = self.chunk_document(
+                text=page_text,
+                document_id=document_id,
+                domain_namespace=domain_namespace,
+                language=page_lang,
+                is_ocr_derived=page_is_ocr,
+                metadata={"page_num": page_num},
+            )
+            # Re-index chunks globally across pages
+            offset = len(all_chunks)
+            for chunk in page_chunks:
+                chunk["chunk_index"] = offset + chunk["chunk_index"]
+            all_chunks.extend(page_chunks)
 
-        for para in paragraphs:
-            para_words = para.split()
-            para_size = len(para_words)
+        return all_chunks
 
-            if current_size + para_size <= max_chunk_size:
-                current_chunk.append(para)
-                current_size += para_size
-            else:
-                # Save current chunk
-                if current_chunk:
-                    chunks.append("\n\n".join(current_chunk))
+    def _split_text(self, text: str) -> List[str]:
+        """Split text into overlapping character windows, breaking at paragraph/newline."""
+        if len(text) <= self._chunk_chars:
+            return [text.strip()]
 
-                # Start new chunk
-                current_chunk = [para]
-                current_size = para_size
-
-        # Add remaining chunk
-        if current_chunk:
-            chunks.append("\n\n".join(current_chunk))
+        chunks: List[str] = []
+        start = 0
+        while start < len(text):
+            end = min(start + self._chunk_chars, len(text))
+            # Try to break at a paragraph or sentence boundary
+            if end < len(text):
+                for sep in ("\n\n", "\n", "۔", ".", "؟", "!", "?"):
+                    last_sep = text.rfind(sep, start + self._overlap_chars, end)
+                    if last_sep > start:
+                        end = last_sep + len(sep)
+                        break
+            chunk = text[start:end].strip()
+            if chunk:
+                chunks.append(chunk)
+            start = end - self._overlap_chars
+            if start >= len(text):
+                break
 
         return chunks

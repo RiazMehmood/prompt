@@ -1,102 +1,118 @@
-"""RAG retrieval service with pgvector similarity search."""
-from backend.src.db.supabase_client import supabase
-from backend.src.services.rag.embeddings import EmbeddingsService
+"""RAGRetrievalService: query ChromaDB with domain namespace + confidence threshold."""
+from typing import Any, Dict, List, Optional
+
+import structlog
+
+from src.config import settings
+from src.db.chromadb_client import get_or_create_domain_collection
+from src.services.rag.embeddings import EmbeddingService
+
+logger = structlog.get_logger(__name__)
 
 
-class RetrievalService:
-    """RAG retrieval service using pgvector."""
+class RAGRetrievalService:
+    """Retrieve semantically similar chunks from the domain's vector store.
 
-    @staticmethod
-    async def search_similar_documents(
+    Key guarantees:
+    - All results filtered to `domain_namespace` (prevents cross-domain leakage)
+    - Results below `min_confidence` (default 0.75) are excluded
+    - Returns empty list rather than guessing when no sufficient matches exist
+    """
+
+    def __init__(self) -> None:
+        self._embedding_svc = EmbeddingService()
+        self._min_confidence = settings.RAG_MIN_CONFIDENCE
+
+    async def retrieve(
+        self,
         query: str,
-        role_id: str,
+        domain_namespace: str,
         top_k: int = 5,
-        confidence_threshold: float = 0.75
-    ) -> dict:
-        """Search for similar documents using vector similarity.
+        language_filter: Optional[str] = None,
+        min_confidence: Optional[float] = None,
+    ) -> List[Dict[str, Any]]:
+        """Retrieve top-k relevant chunks for a query within a domain.
 
         Args:
-            query: User query text
-            role_id: Role ID to filter documents
-            top_k: Number of results to return
-            confidence_threshold: Minimum similarity score
+            query: User query text (will be embedded with query prefix)
+            domain_namespace: Domain namespace for vector isolation
+            top_k: Max chunks to return
+            language_filter: Optional — filter by language ('english'/'urdu'/'sindhi')
+            min_confidence: Override default minimum confidence threshold
 
         Returns:
-            dict with results and metadata
+            List of dicts with keys: chunk_text, confidence, document_id, metadata
         """
-        # Generate query embedding
-        query_embedding = await EmbeddingsService.generate_embedding(query)
+        threshold = min_confidence if min_confidence is not None else self._min_confidence
 
-        # Search using pgvector cosine similarity
-        # Note: Supabase Python client doesn't have native vector search yet
-        # For MVP, we'll use RPC call to a custom function
+        query_vector = self._embedding_svc.embed_query(query)
+        collection = get_or_create_domain_collection(domain_namespace)
+
+        where_filter: Dict[str, Any] = {}
+        if language_filter:
+            where_filter["language"] = language_filter
+
         try:
-            # For now, fetch all approved documents and do similarity in Python
-            # In production, use pgvector's native similarity search
-            response = supabase.table("documents").select("*").eq(
-                "role_id", role_id
-            ).eq("status", "approved").execute()
+            results = collection.query(
+                query_embeddings=[query_vector],
+                n_results=top_k * 2,  # fetch extra, then filter by confidence
+                where=where_filter if where_filter else None,
+                include=["documents", "metadatas", "distances"],
+            )
+        except Exception as exc:
+            logger.error(
+                "chromadb_query_failed",
+                domain=domain_namespace,
+                error=str(exc),
+            )
+            return []
 
-            documents = response.data
+        if not results["ids"] or not results["ids"][0]:
+            return []
 
-            # Calculate cosine similarity for each document
-            results = []
-            for doc in documents:
-                if doc.get("embedding"):
-                    similarity = RetrievalService._cosine_similarity(
-                        query_embedding,
-                        doc["embedding"]
-                    )
+        passages = []
+        for doc_text, meta, distance in zip(
+            results["documents"][0],
+            results["metadatas"][0],
+            results["distances"][0],
+        ):
+            # ChromaDB cosine distance → similarity
+            confidence = 1.0 - distance
+            if confidence < threshold:
+                continue
+            passages.append({
+                "chunk_text": doc_text,
+                "confidence": round(confidence, 4),
+                "document_id": meta.get("document_id", ""),
+                "metadata": meta,
+                "language": meta.get("language", "english"),
+                "is_ocr_derived": meta.get("is_ocr_derived", False),
+            })
 
-                    if similarity >= confidence_threshold:
-                        results.append({
-                            "document_id": doc["document_id"],
-                            "title": doc["title"],
-                            "content": doc["content"],
-                            "metadata": doc.get("metadata", {}),
-                            "similarity": similarity
-                        })
+        # Sort by confidence descending, return top_k
+        passages.sort(key=lambda x: x["confidence"], reverse=True)
+        passages = passages[:top_k]
 
-            # Sort by similarity and take top_k
-            results.sort(key=lambda x: x["similarity"], reverse=True)
-            results = results[:top_k]
+        logger.info(
+            "rag_retrieval_complete",
+            domain=domain_namespace,
+            query_len=len(query),
+            total_candidates=len(results["ids"][0]),
+            returned=len(passages),
+            min_confidence=threshold,
+        )
+        return passages
 
-            return {
-                "success": True,
-                "results": results,
-                "count": len(results),
-                "query": query
-            }
+    async def retrieve_for_slot(
+        self,
+        slot_name: str,
+        query: str,
+        domain_namespace: str,
+        top_k: int = 3,
+    ) -> List[Dict[str, Any]]:
+        """Retrieve chunks specifically for a template slot.
 
-        except Exception as e:
-            return {
-                "success": False,
-                "error": str(e),
-                "results": [],
-                "count": 0
-            }
-
-    @staticmethod
-    def _cosine_similarity(vec1: list[float], vec2: list[float]) -> float:
-        """Calculate cosine similarity between two vectors.
-
-        Args:
-            vec1: First vector
-            vec2: Second vector
-
-        Returns:
-            Similarity score (0-1)
+        Uses slot_name as context prefix for better retrieval precision.
         """
-        import math
-
-        # Dot product
-        dot_product = sum(a * b for a, b in zip(vec1, vec2))
-
-        # Magnitudes
-        magnitude1 = math.sqrt(sum(a * a for a in vec1))
-        magnitude2 = math.sqrt(sum(b * b for b in vec2))
-
-        if magnitude1 == 0 or magnitude2 == 0:
-            return 0.0
-
-        return dot_product / (magnitude1 * magnitude2)
+        enriched_query = f"{slot_name}: {query}"
+        return await self.retrieve(enriched_query, domain_namespace, top_k=top_k)
