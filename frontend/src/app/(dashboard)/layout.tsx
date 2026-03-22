@@ -4,10 +4,12 @@ import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 
 const navLinks = [
-  { href: '/dashboard', label: 'Overview' },
+  { href: '/', label: 'Overview' },
+  { href: '/admin/analytics', label: 'Analytics' },
   { href: '/admin/documents', label: 'Document Queue' },
   { href: '/admin/templates', label: 'Templates' },
   { href: '/admin/domains', label: 'Domains' },
+  { href: '/admin/tokens', label: 'Promo Tokens' },
 ];
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {

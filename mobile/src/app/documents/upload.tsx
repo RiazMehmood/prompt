@@ -30,7 +30,7 @@ export default function DocumentUploadScreen() {
       type: 'application/pdf',
       copyToCacheDirectory: true,
     });
-    if (!result.canceled && result.assets[0]) {
+    if (!result.canceled && result.assets?.[0]) {
       const asset = result.assets[0];
       setSelectedFile({
         uri: asset.uri,
@@ -53,7 +53,7 @@ export default function DocumentUploadScreen() {
       quality: 0.95,
       allowsEditing: false,
     });
-    if (!result.canceled && result.assets[0]) {
+    if (!result.canceled && result.assets?.[0]) {
       const asset = result.assets[0];
       setSelectedFile({
         uri: asset.uri,

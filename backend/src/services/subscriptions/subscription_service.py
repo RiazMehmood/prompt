@@ -5,7 +5,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-from src.db.supabase_client import get_supabase_client
+from src.db.supabase_client import get_supabase_admin
 from src.models.subscription import (
     SubscriptionDetail,
     SubscriptionTier,
@@ -89,7 +89,7 @@ class SubscriptionService:
 
     async def get_current(self, user_id: str) -> SubscriptionDetail:
         """Return the user's current subscription with today's usage counters."""
-        supabase = get_supabase_client(service_role=True)
+        supabase = get_supabase_admin()
         today = self._today_utc()
 
         # Fetch subscription row
@@ -114,8 +114,8 @@ class SubscriptionService:
             else datetime.now(timezone.utc)
         )
         expires = (
-            datetime.fromisoformat(sub_data["expires_at"])
-            if sub_data and sub_data.get("expires_at")
+            datetime.fromisoformat(sub_data["expiry_date"])
+            if sub_data and sub_data.get("expiry_date")
             else None
         )
 
@@ -192,7 +192,7 @@ class SubscriptionService:
 
     async def increment(self, user_id: str, action: str) -> None:
         """Increment usage counter for `action` in usage_logs table."""
-        supabase = get_supabase_client(service_role=True)
+        supabase = get_supabase_admin()
         today = self._today_utc()
         await self._upsert_usage(supabase, user_id, today, action)
 
@@ -228,20 +228,40 @@ class SubscriptionService:
 
     @staticmethod
     async def _get_today_usage(user_id: str, today: str) -> dict[str, int]:
-        supabase = get_supabase_client(service_role=True)
+        supabase = get_supabase_admin()
         resp = (
             supabase.table("usage_logs")
-            .select("action, count")
+            .select("action_type")
             .eq("user_id", user_id)
-            .eq("log_date", today)
+            .gte("timestamp", f"{today}T00:00:00Z")
+            .lte("timestamp", f"{today}T23:59:59Z")
             .execute()
         )
-        return {row["action"]: row["count"] for row in (resp.data or [])}
+        rows = resp.data or []
+        counts: dict[str, int] = {}
+        for row in rows:
+            action = row.get("action_type", "")
+            counts[action] = counts.get(action, 0) + 1
+        # Map action_type values to usage keys
+        return {
+            "doc_generations": counts.get("doc_generation", 0),
+            "uploads": counts.get("upload", 0),
+            "conversations": counts.get("conversation", 0),
+        }
 
     @staticmethod
     async def _upsert_usage(supabase, user_id: str, today: str, action: str) -> None:
-        """Atomically increment or insert usage counter using Supabase upsert."""
-        supabase.rpc(
-            "increment_usage_counter",
-            {"p_user_id": user_id, "p_date": today, "p_action": action},
-        ).execute()
+        """Insert a usage event into usage_logs."""
+        # Fetch user's domain_id (required NOT NULL in usage_logs)
+        profile_resp = (
+            supabase.table("profiles").select("domain_id").eq("id", user_id).single().execute()
+        )
+        domain_id = (profile_resp.data or {}).get("domain_id")
+        if not domain_id:
+            return  # can't log without a domain assignment
+        supabase.table("usage_logs").insert({
+            "user_id": user_id,
+            "action_type": action,
+            "domain_id": domain_id,
+            "details": {},
+        }).execute()

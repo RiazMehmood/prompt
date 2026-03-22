@@ -41,7 +41,7 @@ class ProvenanceTracker:
     def record_rag_slot(
         self,
         slot_name: str,
-        source_doc_id: str,
+        source_doc_id: Optional[str],
         chunk_text: str,
         confidence: float,
         metadata: Optional[Dict[str, Any]] = None,

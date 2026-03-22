@@ -5,7 +5,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
 
-from src.api.dependencies import get_current_user, require_admin
+from src.api.dependencies import CurrentUser, require_admin
 from src.models.promo_token import (
     PromoTokenResponse,
     TokenApplicationResult,
@@ -22,26 +22,26 @@ _service = TokenService()
 @router.post("/tokens/validate", response_model=TokenValidationResult)
 async def validate_token(
     body: TokenValidation,
-    current_user: dict = Depends(get_current_user),
+    current_user: CurrentUser,
 ):
     """Preview the benefit of a token without recording usage."""
     return await _service.validate(
         code=body.code,
-        user_id=current_user["user_id"],
-        user_domain_id=current_user.get("domain_id"),
+        user_id=current_user.id,
+        user_domain_id=current_user.domain_id,
     )
 
 
 @router.post("/tokens/apply", response_model=TokenApplicationResult)
 async def apply_token(
     body: TokenValidation,
-    current_user: dict = Depends(get_current_user),
+    current_user: CurrentUser,
 ):
     """Apply a token and record usage. Atomic — idempotent per user per token."""
     return await _service.apply(
         code=body.code,
-        user_id=current_user["user_id"],
-        user_domain_id=current_user.get("domain_id"),
+        user_id=current_user.id,
+        user_domain_id=current_user.domain_id,
     )
 
 

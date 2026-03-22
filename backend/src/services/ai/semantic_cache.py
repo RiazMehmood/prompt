@@ -14,8 +14,7 @@ from typing import Optional
 import structlog
 
 from src.config import settings
-from src.db.chromadb_client import get_chromadb_client
-from src.services.rag.embeddings import EmbeddingService
+from src.db.chromadb_client import get_chromadb_client, _get_embedding_function
 
 logger = structlog.get_logger(__name__)
 
@@ -36,20 +35,19 @@ class SemanticCacheService:
     """
 
     def __init__(self) -> None:
-        self._embedding_svc = EmbeddingService()
         self._threshold = settings.SEMANTIC_CACHE_THRESHOLD
         client = get_chromadb_client()
         self._collection = client.get_or_create_collection(
             name=_CACHE_COLLECTION_NAME,
+            embedding_function=_get_embedding_function(),
             metadata={"hnsw:space": "cosine"},
         )
 
     def get(self, query: str, domain_namespace: str) -> Optional[str]:
         """Return cached response if a semantically similar query exists, else None."""
         try:
-            vector = self._embedding_svc.embed_query(query)
             results = self._collection.query(
-                query_embeddings=[vector],
+                query_texts=[query],  # ONNX auto-embeds
                 n_results=1,
                 where={"domain_namespace": domain_namespace},
                 include=["metadatas", "distances"],
@@ -76,13 +74,12 @@ class SemanticCacheService:
     def set(self, query: str, domain_namespace: str, response: str) -> None:
         """Cache a query→response pair."""
         try:
-            vector = self._embedding_svc.embed_query(query)
             cache_id = hashlib.sha256(
                 f"{domain_namespace}:{query}".encode()
             ).hexdigest()
             self._collection.upsert(
                 ids=[cache_id],
-                embeddings=[vector],
+                documents=[query],  # ONNX auto-embeds
                 metadatas=[{
                     "domain_namespace": domain_namespace,
                     "query_preview": query[:200],

@@ -4,7 +4,7 @@ from typing import Annotated, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
-from src.api.dependencies import CurrentUser, DomainAdminUser, RootAdminUser, get_current_user
+from src.api.dependencies import AuthenticatedUser, CurrentUser, DomainAdminUser, get_current_user, require_root_admin
 from src.db.supabase_client import get_supabase_admin
 from src.models.domain import DomainCreate, DomainUpdate, DomainResponse
 from src.services.domain_service import DomainService
@@ -41,7 +41,7 @@ async def get_domain(domain_id: str) -> DomainResponse:
 @router.post("", response_model=DomainResponse, status_code=status.HTTP_201_CREATED)
 async def create_domain(
     body: DomainCreate,
-    _admin: RootAdminUser,
+    _admin: AuthenticatedUser = Depends(require_root_admin),
 ) -> DomainResponse:
     """Create a new domain (root_admin only). Auto-provisions ChromaDB collection."""
     svc = DomainService()
@@ -52,7 +52,7 @@ async def create_domain(
 async def update_domain(
     domain_id: str,
     body: DomainUpdate,
-    _admin: RootAdminUser,
+    _admin: AuthenticatedUser = Depends(require_root_admin),
 ) -> DomainResponse:
     """Update domain metadata or configuration (root_admin only)."""
     svc = DomainService()
@@ -62,7 +62,7 @@ async def update_domain(
 @router.delete("/{domain_id}", status_code=status.HTTP_200_OK)
 async def delete_domain(
     domain_id: str,
-    _admin: RootAdminUser,
+    _admin: AuthenticatedUser = Depends(require_root_admin),
 ) -> dict:
     """Deactivate a domain.
 

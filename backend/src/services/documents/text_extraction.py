@@ -90,7 +90,7 @@ class TextExtractionService:
                 file_path,
                 first_page=page_num + 1,
                 last_page=page_num + 1,
-                dpi=300,  # Higher DPI = better OCR accuracy for photographed books
+                dpi=150,  # 150 DPI is sufficient for printed text; 300 uses 4× the RAM per page
             )
             if not images:
                 return {"text": "", "language": hint_language, "confidence": 0.0}

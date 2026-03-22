@@ -49,6 +49,7 @@ export default function InteractScreen() {
   const [sessionId, setSessionId] = useState<string | undefined>(undefined);
   const listRef = useRef<FlatList>(null);
   const [transcription, setTranscription] = useState<TranscriptionResult | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
 
   const isRtlInput = hasArabicScript(input);
 
@@ -195,9 +196,8 @@ export default function InteractScreen() {
         />
         {/* Voice input mic button */}
         <VoiceInput
-          apiBase={API_BASE}
-          authToken={accessToken ?? ''}
-          onTranscriptionReady={(result) => setTranscription(result)}
+          isRecording={isRecording}
+          onPress={() => setIsRecording((r) => !r)}
         />
         <TouchableOpacity
           style={[styles.sendBtn, (!input.trim() || sending) && styles.sendBtnDisabled]}
@@ -213,20 +213,20 @@ export default function InteractScreen() {
       </View>
 
       {/* Transcription review overlay */}
-      {transcription && (
-        <TranscriptionReview
-          text={transcription.text}
-          confidence={transcription.confidence}
-          language={transcription.language}
-          onConfirm={(text) => {
-            setInput(text);
-            handleInputChange(text);
-            setTranscription(null);
-          }}
-          onReRecord={() => setTranscription(null)}
-          onDismiss={() => setTranscription(null)}
-        />
-      )}
+      <TranscriptionReview
+        visible={!!transcription}
+        text={transcription?.text ?? ''}
+        confidence={transcription?.confidence ?? 0}
+        language={transcription?.language ?? 'english'}
+        isRTL={hasArabicScript(transcription?.text ?? '')}
+        onConfirm={(text) => {
+          setInput(text);
+          handleInputChange(text);
+          setTranscription(null);
+        }}
+        onReRecord={() => setTranscription(null)}
+        onDismiss={() => setTranscription(null)}
+      />
     </KeyboardAvoidingView>
   );
 }

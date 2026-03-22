@@ -1,11 +1,10 @@
 """Documents API router — knowledge base upload, listing, approval workflow."""
 import os
-import shutil
 import uuid
 from typing import Annotated, List, Optional
 
 import structlog
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel
 
 from src.api.dependencies import CurrentUser, DomainAdminUser, DomainAssignedUser
@@ -16,6 +15,34 @@ router = APIRouter()
 logger = structlog.get_logger(__name__)
 
 _ALLOWED_MIMES = {"application/pdf", "image/jpeg", "image/png", "image/tiff"}
+
+
+async def _run_ingestion(doc_id: str, file_path: str, domain_namespace: str) -> None:
+    """Background task: extract text + embed document into ChromaDB after approval."""
+    admin = get_supabase_admin()
+    try:
+        from src.services.documents.text_extraction import TextExtractionService
+        from src.services.rag.ingestion import EmbeddingIngestionService
+
+        pages = TextExtractionService().extract_pdf(file_path)
+        chunk_count = await EmbeddingIngestionService().ingest_document(doc_id, domain_namespace, pages)
+
+        ocr_pages = [p for p in pages if p.get("is_ocr")]
+        ocr_avg = (
+            sum(p.get("confidence", 1.0) for p in ocr_pages) / len(ocr_pages)
+            if ocr_pages
+            else 1.0
+        )
+        admin.table("documents").update({
+            "ocr_processed": bool(ocr_pages),
+            "ocr_confidence_avg": round(ocr_avg, 4),
+            "status": "indexed",
+        }).eq("id", doc_id).execute()
+
+        logger.info("ingestion_complete", doc_id=doc_id, chunks=chunk_count, namespace=domain_namespace)
+    except Exception as exc:
+        logger.error("ingestion_failed", doc_id=doc_id, error=str(exc))
+        admin.table("documents").update({"status": "ingestion_failed"}).eq("id", doc_id).execute()
 
 
 class DocumentResponse(BaseModel):
@@ -41,9 +68,9 @@ class RejectRequest(BaseModel):
 
 @router.post("/upload", status_code=status.HTTP_202_ACCEPTED)
 async def upload_document(
-    file: UploadFile,
+    current_user: DomainAssignedUser,
+    file: UploadFile = File(...),
     document_type: str = Form(...),
-    current_user: DomainAssignedUser = Depends(),
 ) -> dict:
     """Upload a knowledge base document (PDF or image) for OCR and approval pipeline."""
     if file.content_type not in _ALLOWED_MIMES:
@@ -88,11 +115,6 @@ async def upload_document(
     doc_id = result.data[0]["id"]
     logger.info("document_uploaded", doc_id=doc_id, filename=file.filename, size_mb=round(size_mb, 2))
 
-    # Trigger background OCR + ingestion pipeline
-    from fastapi import BackgroundTasks
-    # TODO T082: trigger DocumentIngestionWorkflow in background
-    # background_tasks.add_task(ingest_document, doc_id)
-
     return {"id": doc_id, "status": "pending", "message": "Document uploaded and queued for review"}
 
 
@@ -132,19 +154,32 @@ async def get_document(
 async def approve_document(
     doc_id: str,
     body: ApproveRequest,
+    background_tasks: BackgroundTasks,
     admin_user: DomainAdminUser,
 ) -> dict:
-    """Approve a pending document (triggers embedding ingestion)."""
-    supabase_admin = get_supabase_admin()
+    """Approve a pending document and trigger OCR + ChromaDB embedding in the background."""
     from datetime import datetime, timezone
+    supabase_admin = get_supabase_admin()
+
+    doc_resp = supabase_admin.table("documents").select("file_path, domain_id").eq("id", doc_id).single().execute()
+    if not doc_resp.data:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    file_path = doc_resp.data["file_path"]
+    domain_id = doc_resp.data["domain_id"]
+
+    domain_resp = supabase_admin.table("domains").select("knowledge_base_namespace").eq("id", domain_id).single().execute()
+    namespace = (domain_resp.data or {}).get("knowledge_base_namespace") or domain_id
+
     supabase_admin.table("documents").update({
         "status": "approved",
         "approved_by": admin_user.id,
         "approved_at": datetime.now(timezone.utc).isoformat(),
         "approval_notes": body.notes,
     }).eq("id", doc_id).execute()
-    # TODO T084: trigger EmbeddingIngestionService in background
-    logger.info("document_approved", doc_id=doc_id, by=admin_user.id)
+
+    background_tasks.add_task(_run_ingestion, doc_id, file_path, namespace)
+    logger.info("document_approved", doc_id=doc_id, by=admin_user.id, namespace=namespace)
     return {"message": "Document approved and queued for embedding ingestion"}
 
 

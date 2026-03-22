@@ -133,8 +133,8 @@ class DocumentChunkingService:
             chunk = text[start:end].strip()
             if chunk:
                 chunks.append(chunk)
-            start = end - self._overlap_chars
-            if start >= len(text):
+            if end >= len(text):
                 break
+            start = end - self._overlap_chars
 
         return chunks

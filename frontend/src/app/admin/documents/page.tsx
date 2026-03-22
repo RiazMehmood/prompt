@@ -21,7 +21,7 @@ interface AdminDocument {
 
 function getAuthHeader() {
   const token = typeof window !== 'undefined' ? localStorage.getItem('admin_token') : null;
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  return token ? { Authorization: `Bearer ${token}` } : {} as Record<string, string>;
 }
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
@@ -30,7 +30,7 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
     headers: { 'Content-Type': 'application/json', ...getAuthHeader(), ...options?.headers },
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data?.detail ?? 'Request failed');
+  if (!res.ok) throw new Error(data?.error?.message ?? data?.detail ?? 'Request failed');
   return data;
 }
 

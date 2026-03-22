@@ -22,7 +22,7 @@ def _default_dates() -> tuple[str, str]:
     )
 
 
-@router.get("/analytics/overview")
+@router.get("/overview")
 async def overview(
     from_date: Optional[str] = Query(default=None),
     to_date: Optional[str] = Query(default=None),
@@ -33,7 +33,7 @@ async def overview(
     return await _service.get_overview(from_date or d_from, to_date or d_to, domain_id)
 
 
-@router.get("/analytics/subscriptions")
+@router.get("/subscriptions")
 async def subscriptions(
     from_date: Optional[str] = Query(default=None),
     to_date: Optional[str] = Query(default=None),
@@ -44,7 +44,7 @@ async def subscriptions(
     return await _service.get_subscription_stats(from_date or d_from, to_date or d_to, domain_id)
 
 
-@router.get("/analytics/documents")
+@router.get("/documents")
 async def documents(
     from_date: Optional[str] = Query(default=None),
     to_date: Optional[str] = Query(default=None),
@@ -55,7 +55,7 @@ async def documents(
     return await _service.get_document_stats(from_date or d_from, to_date or d_to, domain_id)
 
 
-@router.get("/analytics/domains")
+@router.get("/domains")
 async def domains(
     from_date: Optional[str] = Query(default=None),
     to_date: Optional[str] = Query(default=None),
@@ -65,7 +65,7 @@ async def domains(
     return await _service.get_domain_stats(from_date or d_from, to_date or d_to)
 
 
-@router.get("/analytics/tokens")
+@router.get("/tokens")
 async def tokens(
     from_date: Optional[str] = Query(default=None),
     to_date: Optional[str] = Query(default=None),

@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class AgentPersona(BaseModel):
@@ -79,8 +79,19 @@ class DomainResponse(BaseModel):
     namespace: str
     icon_url: Optional[str]
     is_active: bool
-    user_count: int
-    template_count: int
-    document_count: int
+    user_count: int = 0
+    template_count: int = 0
+    document_count: int = 0
     configuration: DomainConfig
     created_at: datetime
+
+    @model_validator(mode="before")
+    @classmethod
+    def _map_db_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            # Map DB column names → model field names
+            if "knowledge_base_namespace" in data and "namespace" not in data:
+                data["namespace"] = data["knowledge_base_namespace"]
+            if "status" in data and "is_active" not in data:
+                data["is_active"] = data["status"] == "active"
+        return data

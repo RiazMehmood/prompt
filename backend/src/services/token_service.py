@@ -7,7 +7,7 @@ from typing import Optional
 
 from fastapi import HTTPException, status
 
-from src.db.supabase_client import get_supabase_client
+from src.db.supabase_client import get_supabase_admin
 from src.models.promo_token import (
     PromoTokenResponse,
     TokenApplicationResult,
@@ -22,7 +22,7 @@ class TokenService:
     """Handles promo token lifecycle: creation, validation preview, application."""
 
     async def create_token(self, data: TokenCreate) -> PromoTokenResponse:
-        supabase = get_supabase_client(service_role=True)
+        supabase = get_supabase_admin()
 
         # Duplicate code check
         existing = (
@@ -59,7 +59,7 @@ class TokenService:
         self, code: str, user_id: str, user_domain_id: Optional[str] = None
     ) -> TokenValidationResult:
         """Preview token benefit without recording usage."""
-        supabase = get_supabase_client(service_role=True)
+        supabase = get_supabase_admin()
         code = code.strip().upper()
         now = datetime.now(timezone.utc)
 
@@ -134,7 +134,7 @@ class TokenService:
                 success=False, code=code, benefit_applied="", error=validation.error
             )
 
-        supabase = get_supabase_client(service_role=True)
+        supabase = get_supabase_admin()
 
         # Fetch token id
         token_resp = (
@@ -169,7 +169,7 @@ class TokenService:
         return TokenApplicationResult(success=True, code=code, benefit_applied=benefit)
 
     async def list_tokens(self) -> list[PromoTokenResponse]:
-        supabase = get_supabase_client(service_role=True)
+        supabase = get_supabase_admin()
         resp = (
             supabase.table("promotional_tokens")
             .select("*, domain:domains(name)")

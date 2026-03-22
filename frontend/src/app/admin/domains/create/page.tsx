@@ -27,7 +27,7 @@ interface DomainCreateForm {
 
 function getAuthHeader() {
   const token = typeof window !== 'undefined' ? localStorage.getItem('admin_token') : null;
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  return token ? { Authorization: `Bearer ${token}` } : {} as Record<string, string>;
 }
 
 const LANGUAGE_OPTIONS = ['english', 'urdu', 'sindhi'];
@@ -119,7 +119,7 @@ export default function CreateDomainPage() {
         body: JSON.stringify(form),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data?.detail ?? 'Failed to create domain');
+      if (!res.ok) throw new Error(data?.error?.message ?? data?.detail ?? 'Failed to create domain');
       router.push('/admin/domains');
     } catch (err: any) {
       setError(err.message);

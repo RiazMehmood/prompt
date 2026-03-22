@@ -29,7 +29,7 @@ export default function AdminLoginPage() {
       }
       localStorage.setItem('admin_token', data.access_token);
       localStorage.setItem('admin_user', JSON.stringify(data.user));
-      router.push('/dashboard');
+      router.push('/');
     } catch (err: any) {
       setError(err.message);
     } finally {

@@ -4,12 +4,13 @@ from typing import Any, Dict, List, Optional
 
 import structlog
 
+from src.config import settings
 from src.models.template import DataSource, TemplateResponse
 from src.services.rag.provenance import ProvenanceTracker
 
 logger = structlog.get_logger(__name__)
 
-_MIN_CONFIDENCE = 0.75
+_MIN_CONFIDENCE = settings.RAG_MIN_CONFIDENCE
 
 
 @dataclass

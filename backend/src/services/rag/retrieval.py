@@ -5,7 +5,6 @@ import structlog
 
 from src.config import settings
 from src.db.chromadb_client import get_or_create_domain_collection
-from src.services.rag.embeddings import EmbeddingService
 
 logger = structlog.get_logger(__name__)
 
@@ -17,10 +16,10 @@ class RAGRetrievalService:
     - All results filtered to `domain_namespace` (prevents cross-domain leakage)
     - Results below `min_confidence` (default 0.75) are excluded
     - Returns empty list rather than guessing when no sufficient matches exist
+    - Embedding is handled by ChromaDB's ONNX function (no PyTorch at query time)
     """
 
     def __init__(self) -> None:
-        self._embedding_svc = EmbeddingService()
         self._min_confidence = settings.RAG_MIN_CONFIDENCE
 
     async def retrieve(
@@ -45,7 +44,6 @@ class RAGRetrievalService:
         """
         threshold = min_confidence if min_confidence is not None else self._min_confidence
 
-        query_vector = self._embedding_svc.embed_query(query)
         collection = get_or_create_domain_collection(domain_namespace)
 
         where_filter: Dict[str, Any] = {}
@@ -54,7 +52,7 @@ class RAGRetrievalService:
 
         try:
             results = collection.query(
-                query_embeddings=[query_vector],
+                query_texts=[query],  # ChromaDB auto-embeds via ONNX function
                 n_results=top_k * 2,  # fetch extra, then filter by confidence
                 where=where_filter if where_filter else None,
                 include=["documents", "metadatas", "distances"],
@@ -83,7 +81,7 @@ class RAGRetrievalService:
             passages.append({
                 "chunk_text": doc_text,
                 "confidence": round(confidence, 4),
-                "document_id": meta.get("document_id", ""),
+                "document_id": meta.get("document_id") or None,
                 "metadata": meta,
                 "language": meta.get("language", "english"),
                 "is_ocr_derived": meta.get("is_ocr_derived", False),

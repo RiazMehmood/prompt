@@ -119,8 +119,9 @@ async def _generate_reply(query: str, context: str, language: str) -> str:
     )
 
     try:
+        from src.config import settings
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        model = genai.GenerativeModel(settings.GEMINI_MODEL)
         response = model.generate_content(prompt)
         return response.text
     except Exception as exc:

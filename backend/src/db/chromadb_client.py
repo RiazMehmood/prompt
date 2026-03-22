@@ -9,23 +9,32 @@ in .env to move storage to any directory or mounted drive:
 No code change needed when switching storage locations.
 """
 from functools import lru_cache
+from typing import Optional
 
 import chromadb
 import structlog
 from chromadb import Collection
 from chromadb.config import Settings as ChromaSettings
-from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
+from chromadb.utils.embedding_functions import ONNXMiniLM_L6_V2
 
 from src.config import settings
 
 logger = structlog.get_logger(__name__)
 
-# Embedding function is module-level so it is instantiated once and shared across collections.
-# To swap embedding models, change CHROMADB_EMBEDDING_MODEL in .env — no other code changes needed.
-_EMBEDDING_FUNCTION = SentenceTransformerEmbeddingFunction(
-    model_name=settings.CHROMADB_EMBEDDING_MODEL,
-    normalize_embeddings=True,
-)
+# ONNX-based embedding — no PyTorch, ~200 MB RAM, loads in <2s.
+# Model: all-MiniLM-L6-v2 (384-dim), excellent for English legal text.
+# Switch to SentenceTransformerEmbeddingFunction for multilingual (Urdu/Sindhi)
+# once a GPU/dedicated inference server is available.
+_embedding_function: Optional[ONNXMiniLM_L6_V2] = None
+
+
+def _get_embedding_function() -> ONNXMiniLM_L6_V2:
+    global _embedding_function
+    if _embedding_function is None:
+        logger.info("loading_onnx_embedding_model")
+        _embedding_function = ONNXMiniLM_L6_V2()
+        logger.info("onnx_embedding_model_ready", dim=384)
+    return _embedding_function
 
 
 @lru_cache(maxsize=1)
@@ -48,12 +57,14 @@ def get_or_create_domain_collection(domain_namespace: str) -> Collection:
 
     Each domain has its own collection — this is the primary vector isolation mechanism.
     Collection name: ``domain_<namespace>`` (e.g. ``domain_legal_pk``).
+    The ONNX embedding function is always attached so ChromaDB can auto-embed
+    both ingestion documents and query texts consistently.
     """
     client = get_chromadb_client()
     collection_name = f"domain_{domain_namespace}"
     collection = client.get_or_create_collection(
         name=collection_name,
-        embedding_function=_EMBEDDING_FUNCTION,
+        embedding_function=_get_embedding_function(),
         metadata={"hnsw:space": "cosine", "domain_namespace": domain_namespace},
     )
     logger.debug("domain_collection_ready", collection=collection_name)

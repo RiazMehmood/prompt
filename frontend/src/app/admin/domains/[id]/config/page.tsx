@@ -30,7 +30,7 @@ interface DomainDetail {
 
 function getAuthHeader() {
   const token = typeof window !== 'undefined' ? localStorage.getItem('admin_token') : null;
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  return token ? { Authorization: `Bearer ${token}` } : {} as Record<string, string>;
 }
 
 export default function DomainConfigPage() {
@@ -75,7 +75,7 @@ export default function DomainConfigPage() {
         body: JSON.stringify({ configuration: config }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data?.detail ?? 'Failed to save');
+      if (!res.ok) throw new Error(data?.error?.message ?? data?.detail ?? 'Failed to save');
       setSuccess('Configuration saved successfully');
       setConfig(data.configuration);
     } catch (err: any) {

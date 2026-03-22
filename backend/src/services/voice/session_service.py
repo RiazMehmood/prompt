@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from src.db.supabase_client import get_supabase_client
+from src.db.supabase_client import get_supabase_admin
 from src.models.voice import VoiceSessionDetail, VoiceSessionStatus
 
 logger = logging.getLogger(__name__)
@@ -17,7 +17,7 @@ class VoiceSessionService:
 
     async def create(self, user_id: str, audio_file_path: Path) -> str:
         """Create a new voice session record. Returns session_id."""
-        supabase = get_supabase_client(service_role=True)
+        supabase = get_supabase_admin()
         row = {
             "user_id": user_id,
             "status": VoiceSessionStatus.processing.value,
@@ -38,7 +38,7 @@ class VoiceSessionService:
         language: str,
         confidence: float,
     ) -> None:
-        supabase = get_supabase_client(service_role=True)
+        supabase = get_supabase_admin()
         supabase.table("voice_sessions").update(
             {
                 "status": VoiceSessionStatus.completed.value,
@@ -50,7 +50,7 @@ class VoiceSessionService:
         ).eq("id", session_id).execute()
 
     async def fail(self, session_id: str, error_message: str) -> None:
-        supabase = get_supabase_client(service_role=True)
+        supabase = get_supabase_admin()
         supabase.table("voice_sessions").update(
             {
                 "status": VoiceSessionStatus.failed.value,
@@ -60,7 +60,7 @@ class VoiceSessionService:
         ).eq("id", session_id).execute()
 
     async def get(self, session_id: str, user_id: str) -> VoiceSessionDetail:
-        supabase = get_supabase_client(service_role=True)
+        supabase = get_supabase_admin()
         resp = (
             supabase.table("voice_sessions")
             .select("*")

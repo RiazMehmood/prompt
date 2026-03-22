@@ -67,10 +67,20 @@ async def generate_document(
             }
             final_state = await _workflow.run(initial_state, thread_id=thread_id)
 
-            # Update the pre-created document with workflow results
+            # Always update the placeholder doc so the client-known ID stays valid
             if final_state.get("generated_doc_id"):
-                # Workflow already persisted a new row; delete the placeholder
-                admin.table("generated_documents").delete().eq("id", doc_id).execute()
+                # Workflow persisted its own row; copy that data into the placeholder, then delete the dupe
+                wf_doc_id = final_state["generated_doc_id"]
+                wf_result = admin.table("generated_documents").select("*").eq("id", wf_doc_id).single().execute()
+                if wf_result.data:
+                    wf_data = wf_result.data
+                    admin.table("generated_documents").update({
+                        "output_content": wf_data.get("output_content", ""),
+                        "retrieved_sources": wf_data.get("retrieved_sources", []),
+                        "validation_status": wf_data.get("validation_status", "invalid"),
+                        "validation_errors": wf_data.get("validation_errors"),
+                    }).eq("id", doc_id).execute()
+                    admin.table("generated_documents").delete().eq("id", wf_doc_id).execute()
             else:
                 admin.table("generated_documents").update({
                     "output_content": final_state.get("rendered_content", ""),
@@ -100,9 +110,12 @@ async def get_generated_document(
 ) -> DocumentDetail:
     """Poll generated document status and retrieve content when complete."""
     admin = get_supabase_admin()
-    result = admin.table("generated_documents").select("*").eq("id", doc_id).eq(
-        "user_id", current_user.id
-    ).single().execute()
+    try:
+        result = admin.table("generated_documents").select("*").eq("id", doc_id).eq(
+            "user_id", current_user.id
+        ).single().execute()
+    except Exception:
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Document not found"})
     if not result.data:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Document not found"})
     data = result.data

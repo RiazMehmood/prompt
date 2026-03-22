@@ -12,7 +12,12 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import type { Domain } from '@prompt-platform/shared';
+interface Domain {
+  id: string;
+  name: string;
+  slug: string;
+  description?: string;
+}
 import { useAuth } from '../../lib/auth';
 
 const API_BASE = process.env.API_BASE_URL ?? 'http://localhost:8000';

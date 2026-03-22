@@ -17,8 +17,9 @@ logger = structlog.get_logger(__name__)
 _rate_buckets: dict[str, list[float]] = defaultdict(list)
 
 # (max_requests, window_seconds)
-_FREE_TIER_LIMIT = (10, 60)    # 10 req/min for free tier
-_PAID_TIER_LIMIT = (100, 60)   # 100 req/min for paid tiers
+_FREE_TIER_LIMIT = (60, 60)    # 60 req/min for free tier
+_PAID_TIER_LIMIT = (300, 60)   # 300 req/min for paid tiers
+_ADMIN_TIER_LIMIT = (600, 60)  # 600 req/min for admins (no practical limit)
 _AUTH_IP_LIMIT = (100, 3600)   # 100 req/hour per IP for auth endpoints
 
 _AUTH_PATHS = {"/auth/login", "/auth/register", "/auth/verify", "/auth/refresh"}
@@ -115,14 +116,22 @@ def register_exception_handlers(app: FastAPI) -> None:
                 )
                 user_id = payload.get("sub", client_ip)
                 tier = payload.get("subscription_tier", "basic")
+                role = payload.get("role", "user")
             except Exception:
                 user_id = client_ip
                 tier = "basic"
+                role = "user"
         else:
             user_id = client_ip
             tier = "basic"
+            role = "user"
 
-        limit = _FREE_TIER_LIMIT if tier in ("basic", None) else _PAID_TIER_LIMIT
+        if role in ("root_admin", "domain_admin"):
+            limit = _ADMIN_TIER_LIMIT
+        elif tier in ("basic", None):
+            limit = _FREE_TIER_LIMIT
+        else:
+            limit = _PAID_TIER_LIMIT
         if _is_rate_limited(f"user:{user_id}", *limit):
             logger.warning("rate_limited_user", user_id=user_id, tier=tier, path=path)
             return JSONResponse(

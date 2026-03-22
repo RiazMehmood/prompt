@@ -11,7 +11,7 @@ from typing import Any, Callable, Dict, Optional, TypeVar
 
 import structlog
 from langgraph.graph import END, StateGraph
-from langgraph.graph.graph import CompiledGraph
+from langgraph.graph.state import CompiledStateGraph as CompiledGraph
 
 logger = structlog.get_logger(__name__)
 

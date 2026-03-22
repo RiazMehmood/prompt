@@ -5,13 +5,13 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8000'
 
 function getAuthHeader() {
   const token = typeof window !== 'undefined' ? localStorage.getItem('admin_token') : null;
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  return token ? { Authorization: `Bearer ${token}` } : {} as Record<string, string>;
 }
 
 async function apiFetch<T>(path: string): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, { headers: getAuthHeader() });
   const data = await res.json();
-  if (!res.ok) throw new Error(data?.detail ?? 'Request failed');
+  if (!res.ok) throw new Error(data?.error?.message ?? data?.detail ?? 'Request failed');
   return data;
 }
 

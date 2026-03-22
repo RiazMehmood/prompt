@@ -1,31 +1,31 @@
 """EmbeddingIngestionService: chunk → embed → store in ChromaDB for an approved document."""
+import gc
 from typing import Any, Dict, List
 
 import structlog
 
 from src.db.chromadb_client import get_or_create_domain_collection
-from src.db.supabase_client import get_supabase_admin
 from src.services.rag.chunking import DocumentChunkingService
-from src.services.rag.embeddings import EmbeddingService
 
 logger = structlog.get_logger(__name__)
+
+# ChromaDB auto-embeds via the ONNX function attached to the collection.
+# Batch of 50 keeps peak RAM well under 500 MB (ONNX model ~200 MB total).
+_INSERT_BATCH_SIZE = 50
 
 
 class EmbeddingIngestionService:
     """Process an approved document into RAG-ready vector embeddings.
 
     Pipeline:
-    1. Load extracted page texts from the document
-    2. Chunk pages with overlap
-    3. Batch embed chunks using multilingual-e5-base
-    4. Store in ChromaDB with domain namespace + language + is_ocr_derived metadata
-    5. Store chunk metadata in the embeddings Supabase table (for audit/provenance)
+    1. Chunk pages with overlap
+    2. Pass text batches to ChromaDB — the attached ONNXMiniLM_L6_V2 function
+       embeds them in-process using onnxruntime (no PyTorch, ~200 MB RAM)
+    3. Insert each batch immediately, then free from memory
     """
 
     def __init__(self) -> None:
         self._chunker = DocumentChunkingService()
-        self._embedder = EmbeddingService()
-        self._admin = get_supabase_admin()
 
     async def ingest_document(
         self,
@@ -35,15 +35,9 @@ class EmbeddingIngestionService:
     ) -> int:
         """Ingest all pages of an approved document into the vector store.
 
-        Args:
-            document_id: ID of the approved Document record
-            domain_namespace: ChromaDB collection namespace
-            pages: List of page dicts from TextExtractionService
-
         Returns:
             Number of chunks successfully indexed
         """
-        # Chunk all pages
         all_chunks = self._chunker.chunk_pages(
             pages=pages,
             document_id=document_id,
@@ -54,62 +48,42 @@ class EmbeddingIngestionService:
             logger.warning("no_chunks_produced", document_id=document_id)
             return 0
 
-        # Batch embed
-        texts = [c["chunk_text"] for c in all_chunks]
-        vectors = self._embedder.embed_passages(texts, batch_size=32, show_progress=True)
-
-        # Store in ChromaDB
         collection = get_or_create_domain_collection(domain_namespace)
-        chunk_ids = [f"{document_id}_{i}" for i in range(len(all_chunks))]
-        metadatas = [
-            {
-                "document_id": c["document_id"],
-                "chunk_index": c["chunk_index"],
-                "domain_namespace": c["domain_namespace"],
-                "language": c["language"],
-                "is_ocr_derived": c["is_ocr_derived"],
-                **(c.get("metadata") or {}),
-            }
-            for c in all_chunks
-        ]
+        total_indexed = 0
 
-        collection.add(
-            ids=chunk_ids,
-            embeddings=vectors,
-            documents=texts,
-            metadatas=metadatas,
-        )
-
-        # Persist chunk metadata to Supabase embeddings table
-        embedding_rows = [
-            {
-                "document_id": c["document_id"],
-                "chunk_text": c["chunk_text"],
-                "chunk_index": c["chunk_index"],
-                "embedding_vector": vectors[i],
-                "metadata": c.get("metadata") or {},
-                "domain_namespace": domain_namespace,
-                "language": c["language"],
-                "is_ocr_derived": c["is_ocr_derived"],
-            }
-            for i, c in enumerate(all_chunks)
-        ]
-        # Batch insert in chunks of 100
-        for batch_start in range(0, len(embedding_rows), 100):
-            batch = embedding_rows[batch_start : batch_start + 100]
-            self._admin.table("embeddings").insert(batch).execute()
+        for batch_start in range(0, len(all_chunks), _INSERT_BATCH_SIZE):
+            batch = all_chunks[batch_start : batch_start + _INSERT_BATCH_SIZE]
+            collection.add(
+                ids=[f"{document_id}_{batch_start + i}" for i in range(len(batch))],
+                documents=[c["chunk_text"] for c in batch],  # ChromaDB auto-embeds
+                metadatas=[
+                    {
+                        "document_id": c["document_id"],
+                        "chunk_index": batch_start + i,
+                        "domain_namespace": c["domain_namespace"],
+                        "language": c["language"],
+                        "is_ocr_derived": c["is_ocr_derived"],
+                        **(c.get("metadata") or {}),
+                    }
+                    for i, c in enumerate(batch)
+                ],
+            )
+            total_indexed += len(batch)
+            del batch
+            gc.collect()
 
         logger.info(
             "document_ingested",
             document_id=document_id,
-            chunk_count=len(all_chunks),
+            chunk_count=total_indexed,
             domain_namespace=domain_namespace,
         )
-        return len(all_chunks)
+        return total_indexed
 
     async def delete_document_vectors(self, document_id: str, domain_namespace: str) -> None:
         """Remove all vectors for a document (called on document deletion/rejection)."""
+        from src.db.supabase_client import get_supabase_admin
         collection = get_or_create_domain_collection(domain_namespace)
         collection.delete(where={"document_id": document_id})
-        self._admin.table("embeddings").delete().eq("document_id", document_id).execute()
+        get_supabase_admin().table("embeddings").delete().eq("document_id", document_id).execute()
         logger.info("document_vectors_deleted", document_id=document_id)

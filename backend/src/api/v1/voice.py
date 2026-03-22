@@ -5,10 +5,10 @@ import tempfile
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from fastapi.responses import Response
 
-from src.api.dependencies import get_current_user
+from src.api.dependencies import CurrentUser
 from src.models.voice import (
     SpeechSynthesisRequest,
     SpeechSynthesisResponse,
@@ -32,11 +32,11 @@ ALLOWED_AUDIO_TYPES = {"audio/wav", "audio/mpeg", "audio/ogg", "audio/webm", "au
 MAX_AUDIO_SIZE = 25 * 1024 * 1024  # 25 MB (Whisper limit)
 
 
-@router.post("/voice/transcribe", response_model=TranscribeResponse)
+@router.post("/transcribe", response_model=TranscribeResponse)
 async def transcribe_audio(
+    current_user: CurrentUser,
     audio: UploadFile = File(..., description="Audio file (WAV/MP3/OGG/WebM, max 25MB)"),
     language_hint: str = Form(default=None),
-    current_user: dict = Depends(get_current_user),
 ):
     """
     Transcribe spoken audio to text using OpenAI Whisper.
@@ -53,7 +53,7 @@ async def transcribe_audio(
     tmp = Path(tempfile.mktemp(suffix=suffix))
     tmp.write_bytes(content)
 
-    session_id = await _session_svc.create(current_user["user_id"], tmp)
+    session_id = await _session_svc.create(current_user.id, tmp)
 
     try:
         result = await _whisper.transcribe(tmp, language_hint)
@@ -81,22 +81,22 @@ async def transcribe_audio(
         raise HTTPException(status_code=500, detail=f"Transcription failed: {exc}") from exc
 
 
-@router.get("/voice/sessions/{session_id}", response_model=VoiceSessionDetail)
+@router.get("/sessions/{session_id}", response_model=VoiceSessionDetail)
 async def get_voice_session(
     session_id: str,
-    current_user: dict = Depends(get_current_user),
+    current_user: CurrentUser,
 ):
     """Check the status of a voice session."""
     try:
-        return await _session_svc.get(session_id, current_user["user_id"])
+        return await _session_svc.get(session_id, current_user.id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.post("/voice/synthesize", response_model=SpeechSynthesisResponse)
+@router.post("/synthesize", response_model=SpeechSynthesisResponse)
 async def synthesize_speech(
     body: SpeechSynthesisRequest,
-    current_user: dict = Depends(get_current_user),
+    current_user: CurrentUser,
 ):
     """
     Synthesize text to speech.
@@ -132,8 +132,8 @@ async def synthesize_speech(
     )
 
 
-@router.get("/voice/audio/{filename}")
-async def serve_audio(filename: str, current_user: dict = Depends(get_current_user)):
+@router.get("/audio/{filename}")
+async def serve_audio(filename: str, current_user: CurrentUser):
     """Serve cached TTS audio file."""
     from src.services.voice.tts_cache import _CACHE_DIR
     audio_path = _CACHE_DIR / filename
