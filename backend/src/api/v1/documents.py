@@ -42,8 +42,8 @@ class RejectRequest(BaseModel):
 @router.post("/upload", status_code=status.HTTP_202_ACCEPTED)
 async def upload_document(
     file: UploadFile,
-    document_type: str = Form(...),
-    current_user: DomainAssignedUser = Depends(),
+    document_type: Annotated[str, Form()],
+    current_user: DomainAssignedUser,
 ) -> dict:
     """Upload a knowledge base document (PDF or image) for OCR and approval pipeline."""
     if file.content_type not in _ALLOWED_MIMES:
