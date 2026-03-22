@@ -7,7 +7,7 @@ from typing import Optional
 from fastapi import HTTPException, status
 
 from src.db.chromadb_client import get_or_create_domain_collection
-from src.db.supabase_client import get_supabase_client
+from src.db.supabase_client import get_supabase_admin
 from src.models.domain import DomainCreate, DomainResponse, DomainUpdate, DomainConfig
 
 logger = logging.getLogger(__name__)
@@ -17,7 +17,7 @@ class DomainService:
     """CRUD operations for domains with ChromaDB namespace provisioning."""
 
     async def list_domains(self, include_inactive: bool = False) -> list[DomainResponse]:
-        supabase = get_supabase_client(service_role=True)
+        supabase = get_supabase_admin()
         query = supabase.table("domains").select(
             "*, user_count:profiles(count), template_count:templates(count), document_count:documents(count)"
         )
@@ -27,7 +27,7 @@ class DomainService:
         return [self._to_response(row) for row in (resp.data or [])]
 
     async def get_domain(self, domain_id: str) -> DomainResponse:
-        supabase = get_supabase_client(service_role=True)
+        supabase = get_supabase_admin()
         resp = (
             supabase.table("domains")
             .select("*")
@@ -40,7 +40,7 @@ class DomainService:
         return self._to_response(resp.data[0])
 
     async def create_domain(self, data: DomainCreate) -> DomainResponse:
-        supabase = get_supabase_client(service_role=True)
+        supabase = get_supabase_admin()
 
         # Check namespace uniqueness
         existing = (
@@ -80,7 +80,7 @@ class DomainService:
         return self._to_response(resp.data[0])
 
     async def update_domain(self, domain_id: str, data: DomainUpdate) -> DomainResponse:
-        supabase = get_supabase_client(service_role=True)
+        supabase = get_supabase_admin()
         updates = data.model_dump(exclude_none=True)
         if not updates:
             return await self.get_domain(domain_id)
@@ -95,7 +95,7 @@ class DomainService:
         return self._to_response(resp.data[0])
 
     async def update_config(self, domain_id: str, config: DomainConfig) -> DomainResponse:
-        supabase = get_supabase_client(service_role=True)
+        supabase = get_supabase_admin()
         resp = (
             supabase.table("domains")
             .update({"configuration": config.model_dump()})
@@ -108,7 +108,7 @@ class DomainService:
 
     async def delete_domain(self, domain_id: str) -> None:
         """Soft-delete domain only if no active users are assigned to it."""
-        supabase = get_supabase_client(service_role=True)
+        supabase = get_supabase_admin()
         user_count_resp = (
             supabase.table("profiles")
             .select("id", count="exact")

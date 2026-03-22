@@ -5,7 +5,7 @@ import asyncio
 import logging
 from pathlib import Path
 
-from src.db.supabase_client import get_supabase_client
+from src.db.supabase_client import get_supabase_admin
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,7 @@ class AudioCleanupService:
 
         # Null out the DB reference regardless of file deletion success
         try:
-            supabase = get_supabase_client(service_role=True)
+            supabase = get_supabase_admin()
             supabase.table("voice_sessions").update(
                 {"audio_file_path": None}
             ).eq("id", session_id).execute()

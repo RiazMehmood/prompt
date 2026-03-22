@@ -7,9 +7,9 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends
 
-from src.api.dependencies import require_admin
+from src.api.dependencies import RootAdminUser
 from src.config import settings
-from src.db.supabase_client import get_supabase_client
+from src.db.supabase_client import get_supabase_admin
 
 router = APIRouter()
 
@@ -17,7 +17,7 @@ _ALERT_THRESHOLD = 0.80  # Alert at 80% of any free-tier limit
 
 
 @router.get("/admin/free-tier-usage")
-async def free_tier_usage(_admin: dict = Depends(require_admin)):
+async def free_tier_usage(_admin: RootAdminUser):
     """
     Dashboard endpoint for tracking free-tier resource consumption.
     Alerts at 80% of any limit.
@@ -47,7 +47,7 @@ async def free_tier_usage(_admin: dict = Depends(require_admin)):
             })
 
     # ── Supabase row counts ───────────────────────────────────────────────────
-    supabase = get_supabase_client(service_role=True)
+    supabase = get_supabase_admin()
     for table in ["profiles", "generated_documents", "documents", "embeddings"]:
         try:
             resp = supabase.table(table).select("id", count="exact").execute()

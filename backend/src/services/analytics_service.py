@@ -5,7 +5,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-from src.db.supabase_client import get_supabase_client
+from src.db.supabase_client import get_supabase_admin
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ class AnalyticsService:
         domain_id: Optional[str] = None,
     ) -> dict:
         """Top-level KPIs: total users, docs generated, subscriptions, active tokens."""
-        supabase = get_supabase_client(service_role=True)
+        supabase = get_supabase_admin()
 
         users_q = supabase.table("profiles").select("id", count="exact")
         if domain_id:
@@ -65,7 +65,7 @@ class AnalyticsService:
         self, from_date: str, to_date: str, domain_id: Optional[str] = None
     ) -> dict:
         """Subscription tier distribution and churn estimate."""
-        supabase = get_supabase_client(service_role=True)
+        supabase = get_supabase_admin()
 
         all_subs = supabase.table("subscriptions").select("tier, is_active, expires_at").execute()
         rows = all_subs.data or []
@@ -99,7 +99,7 @@ class AnalyticsService:
         self, from_date: str, to_date: str, domain_id: Optional[str] = None
     ) -> dict:
         """Document generation volume by date."""
-        supabase = get_supabase_client(service_role=True)
+        supabase = get_supabase_admin()
 
         q = (
             supabase.table("generated_documents")
@@ -132,7 +132,7 @@ class AnalyticsService:
         self, from_date: str, to_date: str
     ) -> dict:
         """Per-domain: active users, docs generated, top templates."""
-        supabase = get_supabase_client(service_role=True)
+        supabase = get_supabase_admin()
 
         domains_resp = supabase.table("domains").select("id, name").eq("is_active", True).execute()
         domains = domains_resp.data or []
@@ -169,7 +169,7 @@ class AnalyticsService:
         self, from_date: str, to_date: str
     ) -> dict:
         """Token redemption rates and revenue impact."""
-        supabase = get_supabase_client(service_role=True)
+        supabase = get_supabase_admin()
 
         tokens_resp = (
             supabase.table("promotional_tokens")

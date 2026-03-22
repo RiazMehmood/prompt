@@ -5,7 +5,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-from src.db.supabase_client import get_supabase_client
+from src.db.supabase_client import get_supabase_admin
 from src.models.subscription import (
     SubscriptionDetail,
     SubscriptionTier,
@@ -89,7 +89,7 @@ class SubscriptionService:
 
     async def get_current(self, user_id: str) -> SubscriptionDetail:
         """Return the user's current subscription with today's usage counters."""
-        supabase = get_supabase_client(service_role=True)
+        supabase = get_supabase_admin()
         today = self._today_utc()
 
         # Fetch subscription row
@@ -192,7 +192,7 @@ class SubscriptionService:
 
     async def increment(self, user_id: str, action: str) -> None:
         """Increment usage counter for `action` in usage_logs table."""
-        supabase = get_supabase_client(service_role=True)
+        supabase = get_supabase_admin()
         today = self._today_utc()
         await self._upsert_usage(supabase, user_id, today, action)
 
@@ -228,15 +228,21 @@ class SubscriptionService:
 
     @staticmethod
     async def _get_today_usage(user_id: str, today: str) -> dict[str, int]:
-        supabase = get_supabase_client(service_role=True)
+        supabase = get_supabase_admin()
+        # usage_logs has action_type + timestamp; count by action_type for today
         resp = (
             supabase.table("usage_logs")
-            .select("action, count")
+            .select("action_type")
             .eq("user_id", user_id)
-            .eq("log_date", today)
+            .gte("timestamp", f"{today}T00:00:00Z")
+            .lt("timestamp", f"{today}T23:59:59Z")
             .execute()
         )
-        return {row["action"]: row["count"] for row in (resp.data or [])}
+        counts: dict[str, int] = {}
+        for row in (resp.data or []):
+            key = row["action_type"]
+            counts[key] = counts.get(key, 0) + 1
+        return counts
 
     @staticmethod
     async def _upsert_usage(supabase, user_id: str, today: str, action: str) -> None:

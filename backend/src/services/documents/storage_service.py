@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 from src.config import settings
-from src.db.supabase_client import get_supabase_client
+from src.db.supabase_client import get_supabase_admin
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,7 @@ class StorageService:
         Upload file to Supabase Storage and return a signed URL.
         Path: generated-documents/{document_id}/{filename}
         """
-        supabase = get_supabase_client(service_role=True)
+        supabase = get_supabase_admin()
         storage_path = f"{document_id}/{filename}"
 
         try:
@@ -62,7 +62,7 @@ class StorageService:
 
     async def delete_document_files(self, document_id: str) -> None:
         """Remove all files for a document from Supabase Storage."""
-        supabase = get_supabase_client(service_role=True)
+        supabase = get_supabase_admin()
         try:
             files = supabase.storage.from_(BUCKET_NAME).list(document_id)
             paths = [f"{document_id}/{f['name']}" for f in (files or [])]

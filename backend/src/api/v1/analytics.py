@@ -2,15 +2,18 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
-from typing import Optional
+from typing import Annotated, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Query
 
-from src.api.dependencies import require_admin
+from src.api.dependencies import RootAdminUser
 from src.services.analytics_service import AnalyticsService
 
 router = APIRouter()
 _service = AnalyticsService()
+
+OptDate = Annotated[Optional[str], Query()]
+OptDomain = Annotated[Optional[str], Query()]
 
 
 def _default_dates() -> tuple[str, str]:
@@ -24,10 +27,10 @@ def _default_dates() -> tuple[str, str]:
 
 @router.get("/overview")
 async def overview(
-    from_date: Optional[str] = Query(default=None),
-    to_date: Optional[str] = Query(default=None),
-    domain_id: Optional[str] = Query(default=None),
-    _admin: dict = Depends(require_admin),
+    _admin: RootAdminUser,
+    from_date: OptDate = None,
+    to_date: OptDate = None,
+    domain_id: OptDomain = None,
 ):
     d_from, d_to = _default_dates()
     return await _service.get_overview(from_date or d_from, to_date or d_to, domain_id)
@@ -35,10 +38,10 @@ async def overview(
 
 @router.get("/subscriptions")
 async def subscriptions(
-    from_date: Optional[str] = Query(default=None),
-    to_date: Optional[str] = Query(default=None),
-    domain_id: Optional[str] = Query(default=None),
-    _admin: dict = Depends(require_admin),
+    _admin: RootAdminUser,
+    from_date: OptDate = None,
+    to_date: OptDate = None,
+    domain_id: OptDomain = None,
 ):
     d_from, d_to = _default_dates()
     return await _service.get_subscription_stats(from_date or d_from, to_date or d_to, domain_id)
@@ -46,10 +49,10 @@ async def subscriptions(
 
 @router.get("/documents")
 async def documents(
-    from_date: Optional[str] = Query(default=None),
-    to_date: Optional[str] = Query(default=None),
-    domain_id: Optional[str] = Query(default=None),
-    _admin: dict = Depends(require_admin),
+    _admin: RootAdminUser,
+    from_date: OptDate = None,
+    to_date: OptDate = None,
+    domain_id: OptDomain = None,
 ):
     d_from, d_to = _default_dates()
     return await _service.get_document_stats(from_date or d_from, to_date or d_to, domain_id)
@@ -57,9 +60,9 @@ async def documents(
 
 @router.get("/domains")
 async def domains(
-    from_date: Optional[str] = Query(default=None),
-    to_date: Optional[str] = Query(default=None),
-    _admin: dict = Depends(require_admin),
+    _admin: RootAdminUser,
+    from_date: OptDate = None,
+    to_date: OptDate = None,
 ):
     d_from, d_to = _default_dates()
     return await _service.get_domain_stats(from_date or d_from, to_date or d_to)
@@ -67,9 +70,9 @@ async def domains(
 
 @router.get("/tokens")
 async def tokens(
-    from_date: Optional[str] = Query(default=None),
-    to_date: Optional[str] = Query(default=None),
-    _admin: dict = Depends(require_admin),
+    _admin: RootAdminUser,
+    from_date: OptDate = None,
+    to_date: OptDate = None,
 ):
     d_from, d_to = _default_dates()
     return await _service.get_token_stats(from_date or d_from, to_date or d_to)

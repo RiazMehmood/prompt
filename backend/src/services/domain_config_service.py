@@ -5,7 +5,7 @@ import logging
 from functools import lru_cache
 from typing import Optional
 
-from src.db.supabase_client import get_supabase_client
+from src.db.supabase_client import get_supabase_admin
 from src.models.domain import DomainConfig
 
 logger = logging.getLogger(__name__)
@@ -32,7 +32,7 @@ class DomainConfigService:
 
     async def update_config(self, domain_id: str, config: DomainConfig) -> DomainConfig:
         """Persist updated config and invalidate cache."""
-        supabase = get_supabase_client(service_role=True)
+        supabase = get_supabase_admin()
         supabase.table("domains").update(
             {"configuration": config.model_dump()}
         ).eq("id", domain_id).execute()
@@ -66,7 +66,7 @@ class DomainConfigService:
     # ── Private helpers ───────────────────────────────────────────────────────
 
     async def _load_and_cache(self, domain_id: str) -> DomainConfig:
-        supabase = get_supabase_client(service_role=True)
+        supabase = get_supabase_admin()
         resp = (
             supabase.table("domains")
             .select("configuration")
