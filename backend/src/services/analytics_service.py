@@ -41,14 +41,14 @@ class AnalyticsService:
             docs_q = docs_q.eq("domain_id", domain_id)
         docs_resp = docs_q.execute()
 
-        sub_q = supabase.table("subscriptions").select("id, tier", count="exact").eq("is_active", True)
+        sub_q = supabase.table("subscriptions").select("id, tier", count="exact").eq("status", "active")
         sub_resp = sub_q.execute()
 
         tokens_q = (
             supabase.table("token_usage")
             .select("id", count="exact")
-            .gte("used_at", from_date)
-            .lte("used_at", to_date)
+            .gte("redemption_date", from_date)
+            .lte("redemption_date", to_date)
         )
         tokens_resp = tokens_q.execute()
 
@@ -67,7 +67,7 @@ class AnalyticsService:
         """Subscription tier distribution and churn estimate."""
         supabase = get_supabase_admin()
 
-        all_subs = supabase.table("subscriptions").select("tier, is_active, expires_at").execute()
+        all_subs = supabase.table("subscriptions").select("tier, status, expiry_date").execute()
         rows = all_subs.data or []
 
         tier_counts: dict[str, int] = {}
@@ -77,10 +77,10 @@ class AnalyticsService:
         for row in rows:
             tier = row.get("tier", "basic")
             tier_counts[tier] = tier_counts.get(tier, 0) + 1
-            expires = row.get("expires_at")
+            expires = row.get("expiry_date")
             if expires:
                 exp_dt = datetime.fromisoformat(expires).replace(tzinfo=timezone.utc)
-                if exp_dt < now and not row.get("is_active"):
+                if exp_dt < now and not (row.get("status") == "active"):
                     expired_count += 1
 
         total = len(rows) or 1
@@ -103,7 +103,7 @@ class AnalyticsService:
 
         q = (
             supabase.table("generated_documents")
-            .select("created_at, status, domain_id")
+            .select("created_at, validation_status, domain_id")
             .gte("created_at", from_date)
             .lte("created_at", to_date)
         )
@@ -119,7 +119,7 @@ class AnalyticsService:
         for row in rows:
             date = row["created_at"][:10]
             by_date[date] = by_date.get(date, 0) + 1
-            st = row.get("status", "unknown")
+            st = row.get("validation_status", "unknown")
             status_counts[st] = status_counts.get(st, 0) + 1
 
         return {
@@ -134,7 +134,7 @@ class AnalyticsService:
         """Per-domain: active users, docs generated, top templates."""
         supabase = get_supabase_admin()
 
-        domains_resp = supabase.table("domains").select("id, name").eq("is_active", True).execute()
+        domains_resp = supabase.table("domains").select("id, name").eq("status", "active").execute()
         domains = domains_resp.data or []
 
         result = []
@@ -184,8 +184,8 @@ class AnalyticsService:
                 supabase.table("token_usage")
                 .select("id", count="exact")
                 .eq("token_id", token["id"])
-                .gte("used_at", from_date)
-                .lte("used_at", to_date)
+                .gte("redemption_date", from_date)
+                .lte("redemption_date", to_date)
                 .execute()
             )
             period_uses = usage_resp.count or 0
