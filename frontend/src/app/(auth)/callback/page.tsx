@@ -15,16 +15,30 @@ import { roleHomePath } from '@/utils/auth';
 export default function AuthCallbackPage() {
   const router = useRouter();
   const [status, setStatus] = useState('Verifying your account…');
+  const [isError, setIsError] = useState(false);
 
   useEffect(() => {
     const hash = window.location.hash.substring(1);
     const params = new URLSearchParams(hash);
+
+    // Supabase puts error details in the hash when link is invalid/expired
+    const error       = params.get('error');
+    const errorDesc   = params.get('error_description');
+    if (error) {
+      const msg = errorDesc?.replace(/\+/g, ' ') ?? 'Verification link is invalid or expired.';
+      setIsError(true);
+      setStatus(msg);
+      setTimeout(() => router.replace('/login'), 3500);
+      return;
+    }
+
     const accessToken  = params.get('access_token');
     const refreshToken = params.get('refresh_token');
 
     if (!accessToken) {
-      setStatus('Verification link is invalid or expired.');
-      setTimeout(() => router.replace('/login'), 3000);
+      setIsError(true);
+      setStatus('Verification link is invalid or has already been used. Redirecting to sign in…');
+      setTimeout(() => router.replace('/login'), 3500);
       return;
     }
 
@@ -60,9 +74,16 @@ export default function AuthCallbackPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-950 via-gray-900 to-gray-800">
-      <div className="text-center">
-        <div className="w-12 h-12 border-4 border-white/20 border-t-white rounded-full animate-spin mx-auto mb-4" />
-        <p className="text-white text-sm">{status}</p>
+      <div className="text-center max-w-sm px-6">
+        {isError ? (
+          <div className="text-4xl mb-4">⚠️</div>
+        ) : (
+          <div className="w-12 h-12 border-4 border-white/20 border-t-white rounded-full animate-spin mx-auto mb-4" />
+        )}
+        <p className={`text-sm ${isError ? 'text-red-300' : 'text-white'}`}>{status}</p>
+        {isError && (
+          <p className="text-gray-500 text-xs mt-2">Redirecting to sign in…</p>
+        )}
       </div>
     </div>
   );

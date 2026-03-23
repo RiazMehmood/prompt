@@ -78,7 +78,7 @@ export default function DashboardShell({
 
   const handleLogout = () => {
     logout();
-    router.replace('/login');
+    router.replace('/landing');
   };
 
   return (

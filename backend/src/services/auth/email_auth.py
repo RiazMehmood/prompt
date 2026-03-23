@@ -33,6 +33,11 @@ class EmailAuthService:
 
     async def register(self, email: str, password: str, redirect_to: str = "") -> dict:
         """Register a new user via Supabase Auth (sends verification email)."""
+        # Check if email is already registered
+        existing = self._admin.table("profiles").select("id").eq("email", email).execute()
+        if existing.data:
+            raise ValueError("An account with this email already exists. Please sign in.")
+
         try:
             signup_opts: dict = {"email": email, "password": password}
             if redirect_to:
@@ -42,6 +47,8 @@ class EmailAuthService:
                 raise ValueError("Registration failed — no user returned")
             logger.info("user_registered", email=email[:3] + "***")
             return {"message": "Verification email sent", "user_id": response.user.id}
+        except ValueError:
+            raise
         except Exception as exc:
             logger.error("registration_failed", error=str(exc))
             raise ValueError(f"Registration failed: {exc}") from exc

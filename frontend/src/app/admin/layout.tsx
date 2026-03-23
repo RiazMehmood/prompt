@@ -58,12 +58,12 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
   useEffect(() => {
     const token = localStorage.getItem('auth_token') ?? localStorage.getItem('admin_token');
-    if (!token) router.replace('/login');
+    if (!token) router.replace('/landing');
   }, [router]);
 
   const handleLogout = () => {
     ['auth_token', 'auth_user', 'admin_token', 'admin_user'].forEach(k => localStorage.removeItem(k));
-    router.replace('/login');
+    router.replace('/landing');
   };
 
   return (
