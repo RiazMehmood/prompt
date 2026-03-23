@@ -31,7 +31,9 @@ async def register(body: UserRegistration) -> JSONResponse:
         # Redirect to frontend callback page after email verification
         import os
         frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000").rstrip("/")
-        redirect_to = f"{frontend_url}/auth/callback"
+        # Redirect to root — root page detects the Supabase hash and forwards
+        # to /auth/callback. This works without whitelisting a specific callback URL.
+        redirect_to = frontend_url
         result = await svc.register(body.email, body.password, redirect_to=redirect_to)
         return JSONResponse(status_code=201, content=result)
     else:
