@@ -1,12 +1,15 @@
 'use client';
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { getUser, getToken, roleHomePath } from '@/utils/auth';
 
-export default function HomePage() {
+export default function RootPage() {
   const router = useRouter();
   useEffect(() => {
-    const token = localStorage.getItem('admin_token');
-    router.replace(token ? '/admin/analytics' : '/login');
+    const token = getToken();
+    const user  = getUser();
+    if (!token || !user) { router.replace('/login'); return; }
+    router.replace(roleHomePath(user.role));
   }, [router]);
   return null;
 }
