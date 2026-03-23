@@ -15,28 +15,51 @@ const plans = [
     name: 'Free Trial',
     price: 'Free — 7 days',
     desc: 'Try before you buy',
-    features: ['20 AI conversations / week','2 document generations / week','Max 5 pages per document','2 uploads / week','English only'],
+    features: ['20 conversations / week','2 doc generations / week','Max 5 pages per doc','2 uploads / week','English only'],
     cta: 'Start free trial',
     href: '/signup',
     highlight: false,
+    badge: '',
+  },
+  {
+    name: 'Basic',
+    price: 'PKR 499/mo',
+    desc: 'For everyday use',
+    features: ['20 conversations/day','5 doc generations/day','2 uploads/day','English & Urdu','Standard support'],
+    cta: 'Coming soon',
+    href: '/signup',
+    highlight: false,
+    badge: '',
   },
   {
     name: 'Pro',
     price: 'PKR 1,500/mo',
     desc: 'For professionals',
-    features: ['50 document generations/day','200 conversations/day','20 uploads/day','English, Urdu & Sindhi','Priority processing'],
+    features: ['200 conversations/day','50 doc generations/day','20 uploads/day','English, Urdu & Sindhi','Priority processing'],
     cta: 'Coming soon',
     href: '/signup',
     highlight: true,
+    badge: 'Most Popular',
+  },
+  {
+    name: 'Premium',
+    price: 'PKR 3,500/mo',
+    desc: 'For power users',
+    features: ['1,000 conversations/day','200 doc generations/day','100 uploads/day','All languages','Voice input & TTS','Custom templates'],
+    cta: 'Coming soon',
+    href: '/signup',
+    highlight: false,
+    badge: '',
   },
   {
     name: 'Institute',
     price: 'Custom',
     desc: 'For schools & firms',
-    features: ['Unlimited seats','Dedicated namespace','Bulk user import','Admin portal','Custom discount'],
+    features: ['Unlimited seats','Dedicated namespace','Bulk user import','Admin portal','Custom discount','SLA support'],
     cta: 'Contact us',
     href: 'mailto:hello@promptplatform.pk',
     highlight: false,
+    badge: '',
   },
 ];
 
@@ -110,20 +133,29 @@ export default function LandingPage() {
             <h2 className="text-3xl font-bold text-gray-900">Simple, transparent pricing</h2>
             <p className="text-gray-500 mt-3">Start free. Scale as you grow.</p>
           </div>
-          <div className="grid md:grid-cols-3 gap-6">
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
             {plans.map(p => (
-              <div key={p.name} className={`rounded-2xl p-6 border ${p.highlight ? 'border-indigo-500 bg-indigo-50 shadow-lg shadow-indigo-100' : 'border-gray-100 bg-white'}`}>
-                <p className={`text-xs font-bold uppercase tracking-wider mb-2 ${p.highlight ? 'text-indigo-500' : 'text-gray-400'}`}>{p.name}</p>
-                <p className="text-3xl font-bold text-gray-900">{p.price}</p>
-                <p className="text-sm text-gray-500 mt-1 mb-5">{p.desc}</p>
-                <ul className="space-y-2 mb-6">
+              <div key={p.name} className={`rounded-2xl p-5 border flex flex-col ${p.highlight ? 'border-indigo-500 bg-indigo-50 shadow-lg shadow-indigo-100' : 'border-gray-100 bg-white'}`}>
+                {p.badge && (
+                  <span className="inline-block self-start text-xs font-bold bg-indigo-600 text-white px-2 py-0.5 rounded-full mb-2">{p.badge}</span>
+                )}
+                <p className={`text-xs font-bold uppercase tracking-wider mb-1 ${p.highlight ? 'text-indigo-500' : 'text-gray-400'}`}>{p.name}</p>
+                <p className="text-2xl font-bold text-gray-900">{p.price}</p>
+                <p className="text-xs text-gray-500 mt-1 mb-4">{p.desc}</p>
+                <ul className="space-y-1.5 mb-6 flex-1">
                   {p.features.map(f => (
-                    <li key={f} className="flex items-start gap-2 text-sm text-gray-700">
-                      <span className={p.highlight ? 'text-indigo-500' : 'text-gray-400'}>✓</span> {f}
+                    <li key={f} className="flex items-start gap-2 text-xs text-gray-700">
+                      <span className={`mt-0.5 ${p.highlight ? 'text-indigo-500' : 'text-gray-400'}`}>✓</span> {f}
                     </li>
                   ))}
                 </ul>
-                <a href={p.href} className={`block text-center py-3 rounded-xl font-medium text-sm transition ${p.highlight ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-gray-900 text-white hover:bg-gray-700'}`}>
+                <a href={p.href} className={`block text-center py-2.5 rounded-xl font-medium text-sm transition ${
+                  p.cta === 'Coming soon'
+                    ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                    : p.highlight
+                    ? 'bg-indigo-600 text-white hover:bg-indigo-700'
+                    : 'bg-gray-900 text-white hover:bg-gray-700'
+                }`}>
                   {p.cta}
                 </a>
               </div>
