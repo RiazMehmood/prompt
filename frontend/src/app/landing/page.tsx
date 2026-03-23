@@ -12,20 +12,20 @@ const features = [
 
 const plans = [
   {
-    name: 'Basic',
-    price: 'Free',
-    desc: 'For individual users',
-    features: ['20 AI conversations/day','5 document generations/day','2 uploads/day','English & Urdu support'],
-    cta: 'Get started',
+    name: 'Free Trial',
+    price: 'Free — 7 days',
+    desc: 'Try before you buy',
+    features: ['20 AI conversations / week','2 document generations / week','Max 5 pages per document','2 uploads / week','English only'],
+    cta: 'Start free trial',
     href: '/signup',
     highlight: false,
   },
   {
-    name: 'Standard',
-    price: 'PKR 999/mo',
+    name: 'Pro',
+    price: 'PKR 1,500/mo',
     desc: 'For professionals',
-    features: ['100 conversations/day','20 document generations/day','10 uploads/day','All languages','Priority support'],
-    cta: 'Start free trial',
+    features: ['50 document generations/day','200 conversations/day','20 uploads/day','English, Urdu & Sindhi','Priority processing'],
+    cta: 'Coming soon',
     href: '/signup',
     highlight: true,
   },
@@ -136,7 +136,7 @@ export default function LandingPage() {
       <section className="bg-gray-950 text-white py-20 px-6">
         <div className="max-w-3xl mx-auto text-center">
           <h2 className="text-3xl font-bold mb-4">Ready to get started?</h2>
-          <p className="text-gray-400 mb-8">Join thousands of professionals already using Prompt Platform.</p>
+          <p className="text-gray-400 mb-8">Start your 7-day free trial — no credit card required.</p>
           <Link href="/signup" className="inline-block bg-white text-gray-900 px-8 py-4 rounded-2xl font-semibold hover:bg-gray-100 transition text-base">
             Create free account
           </Link>
