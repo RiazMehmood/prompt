@@ -40,7 +40,7 @@ TIER_CATALOG: list[TierDetail] = [
     TierDetail(
         tier=SubscriptionTier.basic,
         display_name="Basic",
-        price_pkr_monthly=None,
+        price_pkr_monthly=1000,
         limits=UsageLimits.for_tier(SubscriptionTier.basic),
         features=[
             TierFeature(name="5 document generations/day", included=True),

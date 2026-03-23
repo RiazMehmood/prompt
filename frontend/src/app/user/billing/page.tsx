@@ -156,7 +156,9 @@ export default function UserBillingPage() {
                 <p className="font-bold text-gray-900">{t.display_name}</p>
               </div>
               <p className="text-xl font-bold text-gray-900 mb-3">
-                {t.price_pkr_monthly ? `PKR ${t.price_pkr_monthly.toLocaleString()}/mo` : 'Free'}
+                {t.price_pkr_monthly
+                  ? `PKR ${t.price_pkr_monthly.toLocaleString()}/mo`
+                  : t.tier === 'institutional' ? 'Custom' : 'Free'}
               </p>
               <ul className="space-y-1.5 mb-5">
                 {t.features.map(f => (

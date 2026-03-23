@@ -29,7 +29,8 @@ async def register(body: UserRegistration) -> JSONResponse:
     if body.email:
         svc = EmailAuthService()
         # Redirect to frontend callback page after email verification
-        frontend_url = "http://localhost:3000"  # override with FRONTEND_URL env in production
+        import os
+        frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000").rstrip("/")
         redirect_to = f"{frontend_url}/auth/callback"
         result = await svc.register(body.email, body.password, redirect_to=redirect_to)
         return JSONResponse(status_code=201, content=result)
