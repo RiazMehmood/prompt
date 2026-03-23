@@ -8,7 +8,7 @@ export default function RootPage() {
   useEffect(() => {
     const token = getToken();
     const user  = getUser();
-    if (!token || !user) { router.replace('/login'); return; }
+    if (!token || !user) { router.replace('/landing'); return; }
     router.replace(roleHomePath(user.role));
   }, [router]);
   return null;
