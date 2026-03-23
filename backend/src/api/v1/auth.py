@@ -4,6 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, Body, status
 from fastapi.responses import JSONResponse
 
+from src.api.dependencies import CurrentUser
 from src.models.user import (
     LoginResponse,
     RefreshTokenRequest,
@@ -27,7 +28,10 @@ async def register(body: UserRegistration) -> JSONResponse:
     """
     if body.email:
         svc = EmailAuthService()
-        result = await svc.register(body.email, body.password)
+        # Redirect to frontend callback page after email verification
+        frontend_url = "http://localhost:3000"  # override with FRONTEND_URL env in production
+        redirect_to = f"{frontend_url}/auth/callback"
+        result = await svc.register(body.email, body.password, redirect_to=redirect_to)
         return JSONResponse(status_code=201, content=result)
     else:
         svc = PhoneAuthService()
@@ -65,6 +69,18 @@ async def send_phone_otp(phone: Annotated[str, Body(embed=True)]) -> JSONRespons
     svc = PhoneAuthService()
     result = await svc.send_otp(phone)
     return JSONResponse(content=result)
+
+
+@router.get("/me")
+async def get_me(current_user: CurrentUser) -> dict:
+    """Return the authenticated user's profile. Used by the email-verification callback."""
+    return {
+        "id":                current_user.id,
+        "email":             current_user.email,
+        "role":              current_user.role,
+        "domain_id":         current_user.domain_id,
+        "subscription_tier": current_user.subscription_tier,
+    }
 
 
 @router.post("/refresh", response_model=LoginResponse)

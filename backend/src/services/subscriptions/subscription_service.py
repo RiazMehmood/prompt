@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from src.db.supabase_client import get_supabase_admin
@@ -18,11 +18,28 @@ from src.models.subscription import (
 
 logger = logging.getLogger(__name__)
 
-# All tier definitions (paid tiers show "Coming Soon" — upgrade_available = False)
+# All tier definitions
 TIER_CATALOG: list[TierDetail] = [
     TierDetail(
+        tier=SubscriptionTier.free_trial,
+        display_name="Free Trial (7 days)",
+        price_pkr_monthly=None,
+        limits=UsageLimits.for_tier(SubscriptionTier.free_trial),
+        features=[
+            TierFeature(name="20 AI conversations / 7 days", included=True),
+            TierFeature(name="2 document generations / 7 days", included=True),
+            TierFeature(name="2 uploads / 7 days", included=True),
+            TierFeature(name="Max 5 pages per document", included=True),
+            TierFeature(name="English language only", included=True),
+            TierFeature(name="Urdu / Sindhi support", included=False),
+            TierFeature(name="Priority processing", included=False),
+        ],
+        is_available=True,
+        highlight=False,
+    ),
+    TierDetail(
         tier=SubscriptionTier.basic,
-        display_name="Basic (Free)",
+        display_name="Basic",
         price_pkr_monthly=None,
         limits=UsageLimits.for_tier(SubscriptionTier.basic),
         features=[
@@ -34,7 +51,7 @@ TIER_CATALOG: list[TierDetail] = [
             TierFeature(name="Priority processing", included=False),
             TierFeature(name="Voice input", included=False),
         ],
-        is_available=True,
+        is_available=False,  # Unlocked after trial — contact support
         highlight=False,
     ),
     TierDetail(
@@ -88,9 +105,13 @@ class SubscriptionService:
     """Manages subscription tier resolution and usage limit enforcement."""
 
     async def get_current(self, user_id: str) -> SubscriptionDetail:
-        """Return the user's current subscription with today's usage counters."""
+        """Return the user's current subscription with period usage counters.
+
+        Auto-creates a 7-day free_trial subscription on first call if none exists.
+        """
         supabase = get_supabase_admin()
         today = self._today_utc()
+        now = datetime.now(timezone.utc)
 
         # Fetch subscription row
         sub_resp = (
@@ -102,16 +123,42 @@ class SubscriptionService:
             .execute()
         )
         sub_data = sub_resp.data[0] if sub_resp.data else None
-        tier = SubscriptionTier(sub_data["tier"]) if sub_data else SubscriptionTier.basic
+
+        # Auto-create free_trial subscription on first use
+        if not sub_data:
+            expiry = (now + timedelta(days=7)).date().isoformat()
+            try:
+                created = supabase.table("subscriptions").insert({
+                    "user_id": user_id,
+                    "tier": SubscriptionTier.free_trial.value,
+                    "status": "active",
+                    "expiry_date": expiry,
+                    "is_trial": True,
+                }).execute()
+                sub_data = created.data[0] if created.data else None
+            except Exception:
+                pass  # Fall through with defaults if insert fails
+
+        # Determine tier (expire trial → basic if past expiry)
+        raw_tier = sub_data["tier"] if sub_data else SubscriptionTier.free_trial.value
+        expires_str = sub_data.get("expiry_date") if sub_data else None
+        if expires_str:
+            expiry_dt = datetime.fromisoformat(expires_str).replace(tzinfo=timezone.utc) \
+                if "T" in expires_str \
+                else datetime.strptime(expires_str[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            if now > expiry_dt and raw_tier == SubscriptionTier.free_trial.value:
+                raw_tier = SubscriptionTier.basic.value  # Trial expired → basic
+
+        tier = SubscriptionTier(raw_tier) if raw_tier in SubscriptionTier._value2member_map_ else SubscriptionTier.free_trial
         limits = UsageLimits.for_tier(tier)
 
-        # Fetch today's usage counters from usage_logs
-        usage = await self._get_today_usage(user_id, today)
+        # Fetch usage for the relevant period (daily or weekly)
+        usage = await self._get_period_usage(user_id, today, limits.limit_period)
 
         started = (
             datetime.fromisoformat(sub_data["created_at"])
             if sub_data
-            else datetime.now(timezone.utc)
+            else now
         )
         expires = (
             datetime.fromisoformat(sub_data["expiry_date"])
@@ -124,13 +171,13 @@ class SubscriptionService:
         convs = usage.get("conversations", 0)
 
         return SubscriptionDetail(
-            id=sub_data["id"] if sub_data else "free",
+            id=sub_data["id"] if sub_data else "trial",
             user_id=user_id,
             tier=tier,
             limits=limits,
             started_at=started,
             expires_at=expires,
-            is_trial=sub_data.get("is_trial", False) if sub_data else False,
+            is_trial=sub_data.get("is_trial", tier == SubscriptionTier.free_trial) if sub_data else True,
             docs_generated_today=docs_gen,
             uploads_today=uploads,
             conversations_today=convs,
@@ -152,6 +199,9 @@ class SubscriptionService:
         sub = await self.get_current(user_id)
         today = self._today_utc()
 
+        period_label = "this week" if sub.limits.limit_period == "weekly" else "today"
+        reset_note = "Resets next week." if sub.limits.limit_period == "weekly" else "Resets at midnight UTC."
+
         if action == "doc_generation":
             if sub.docs_generated_today >= sub.limits.doc_generations_per_day:
                 return UpgradePrompt(
@@ -161,7 +211,7 @@ class SubscriptionService:
                     upgrade_available=False,
                     message=(
                         f"You've used all {sub.limits.doc_generations_per_day} "
-                        f"document generations for today. Limit resets at midnight UTC."
+                        f"document generations for {period_label}. {reset_note}"
                     ),
                 )
         elif action == "upload":
@@ -172,8 +222,8 @@ class SubscriptionService:
                     limit_reached=sub.limits.uploads_per_day,
                     upgrade_available=False,
                     message=(
-                        f"You've reached today's upload limit "
-                        f"({sub.limits.uploads_per_day} files). Resets at midnight UTC."
+                        f"You've reached the upload limit for {period_label} "
+                        f"({sub.limits.uploads_per_day} files). {reset_note}"
                     ),
                 )
         elif action == "conversation":
@@ -184,8 +234,8 @@ class SubscriptionService:
                     limit_reached=sub.limits.conversation_messages_per_day,
                     upgrade_available=False,
                     message=(
-                        f"You've reached today's conversation limit "
-                        f"({sub.limits.conversation_messages_per_day} messages). Resets at midnight UTC."
+                        f"You've reached the conversation limit for {period_label} "
+                        f"({sub.limits.conversation_messages_per_day} messages). {reset_note}"
                     ),
                 )
         return None
@@ -199,7 +249,7 @@ class SubscriptionService:
     async def get_usage(self, user_id: str) -> UsageResponse:
         sub = await self.get_current(user_id)
         today = self._today_utc()
-        usage = await self._get_today_usage(user_id, today)
+        usage = await self._get_period_usage(user_id, today, sub.limits.limit_period)
         docs_gen = usage.get("doc_generations", 0)
         uploads = usage.get("uploads", 0)
         convs = usage.get("conversations", 0)
@@ -227,14 +277,22 @@ class SubscriptionService:
         return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     @staticmethod
-    async def _get_today_usage(user_id: str, today: str) -> dict[str, int]:
+    async def _get_period_usage(user_id: str, today: str, period: str = "daily") -> dict[str, int]:
+        """Fetch usage counts for 'daily' (today only) or 'weekly' (last 7 days)."""
         supabase = get_supabase_admin()
+        if period == "weekly":
+            start_dt = (datetime.now(timezone.utc) - timedelta(days=6)).strftime("%Y-%m-%d")
+            period_start = f"{start_dt}T00:00:00Z"
+        else:
+            period_start = f"{today}T00:00:00Z"
+        period_end = f"{today}T23:59:59Z"
+
         resp = (
             supabase.table("usage_logs")
             .select("action_type")
             .eq("user_id", user_id)
-            .gte("timestamp", f"{today}T00:00:00Z")
-            .lte("timestamp", f"{today}T23:59:59Z")
+            .gte("timestamp", period_start)
+            .lte("timestamp", period_end)
             .execute()
         )
         rows = resp.data or []
@@ -242,7 +300,6 @@ class SubscriptionService:
         for row in rows:
             action = row.get("action_type", "")
             counts[action] = counts.get(action, 0) + 1
-        # Map action_type values to usage keys
         return {
             "doc_generations": counts.get("doc_generation", 0),
             "uploads": counts.get("upload", 0),

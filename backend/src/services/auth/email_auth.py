@@ -31,10 +31,13 @@ class EmailAuthService:
         self._client = get_supabase_client()
         self._admin = get_supabase_admin()
 
-    async def register(self, email: str, password: str) -> dict:
+    async def register(self, email: str, password: str, redirect_to: str = "") -> dict:
         """Register a new user via Supabase Auth (sends verification email)."""
         try:
-            response = self._client.auth.sign_up({"email": email, "password": password})
+            signup_opts: dict = {"email": email, "password": password}
+            if redirect_to:
+                signup_opts["options"] = {"email_redirect_to": redirect_to}
+            response = self._client.auth.sign_up(signup_opts)
             if response.user is None:
                 raise ValueError("Registration failed — no user returned")
             logger.info("user_registered", email=email[:3] + "***")
