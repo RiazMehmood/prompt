@@ -23,7 +23,7 @@ const plans = [
   },
   {
     name: 'Basic',
-    price: 'PKR 499/mo',
+    price: 'PKR 1,000/mo',
     desc: 'For everyday use',
     features: ['20 conversations/day','5 doc generations/day','2 uploads/day','English & Urdu','Standard support'],
     cta: 'Coming soon',
