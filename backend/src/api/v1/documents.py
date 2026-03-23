@@ -7,7 +7,7 @@ import structlog
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel
 
-from src.api.dependencies import CurrentUser, DomainAdminUser, DomainAssignedUser
+from src.api.dependencies import ApproveDocumentsUser, CurrentUser, DomainAdminUser, DomainAssignedUser
 from src.config import settings
 from src.db.supabase_client import get_supabase_admin
 
@@ -155,7 +155,7 @@ async def approve_document(
     doc_id: str,
     body: ApproveRequest,
     background_tasks: BackgroundTasks,
-    admin_user: DomainAdminUser,
+    admin_user: ApproveDocumentsUser,
 ) -> dict:
     """Approve a pending document and trigger OCR + ChromaDB embedding in the background."""
     from datetime import datetime, timezone
@@ -187,7 +187,7 @@ async def approve_document(
 async def reject_document(
     doc_id: str,
     body: RejectRequest,
-    admin_user: DomainAdminUser,
+    admin_user: ApproveDocumentsUser,
 ) -> dict:
     """Reject a pending document with a reason."""
     supabase_admin = get_supabase_admin()

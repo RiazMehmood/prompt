@@ -6,7 +6,7 @@ from typing import Optional
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query
 from pydantic import BaseModel, EmailStr
 
-from src.api.dependencies import AuthenticatedUser, require_admin, require_root_admin
+from src.api.dependencies import AuthenticatedUser, ManageSubsUser, ManageUsersUser, require_admin, require_root_admin
 from src.config import settings
 from src.db.supabase_client import get_supabase_admin
 
@@ -150,12 +150,12 @@ async def reingest_document(
 
 @router.get("/admin/users")
 async def list_users(
+    _admin: ManageUsersUser,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     domain_id: Optional[str] = Query(default=None),
     role: Optional[str] = Query(default=None),
     search: Optional[str] = Query(default=None),
-    _admin: AuthenticatedUser = Depends(require_admin),
 ):
     """List all users with pagination, filtering by domain/role, and search by email."""
     supabase = get_supabase_admin()
@@ -165,8 +165,8 @@ async def list_users(
         "domains(name)"
     )
 
-    # Domain admins can only see users in their own domain
-    if _admin.role == "domain_admin":
+    # Domain admins and staff with manage_domain_users are scoped to their domain
+    if _admin.role in ("domain_admin", "staff") and _admin.domain_id:
         query = query.eq("domain_id", _admin.domain_id)
     elif domain_id:
         query = query.eq("domain_id", domain_id)
@@ -182,7 +182,7 @@ async def list_users(
 
     # Count total
     count_query = supabase.table("profiles").select("id", count="exact")
-    if _admin.role == "domain_admin":
+    if _admin.role in ("domain_admin", "staff") and _admin.domain_id:
         count_query = count_query.eq("domain_id", _admin.domain_id)
     elif domain_id:
         count_query = count_query.eq("domain_id", domain_id)
@@ -203,7 +203,7 @@ async def list_users(
 @router.get("/admin/users/{user_id}")
 async def get_user(
     user_id: str,
-    _admin: AuthenticatedUser = Depends(require_admin),
+    _admin: ManageUsersUser,
 ):
     """Get full profile details for a specific user."""
     supabase = get_supabase_admin()
@@ -216,9 +216,10 @@ async def get_user(
     if not resp.data:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # Domain admin can only view users in their domain
-    if _admin.role == "domain_admin" and resp.data.get("domain_id") != _admin.domain_id:
-        raise HTTPException(status_code=403, detail="Access denied")
+    # Domain admin and domain-scoped staff can only view users in their domain
+    if _admin.role in ("domain_admin", "staff") and _admin.domain_id:
+        if resp.data.get("domain_id") != _admin.domain_id:
+            raise HTTPException(status_code=403, detail="Access denied")
 
     return resp.data
 
@@ -227,7 +228,7 @@ async def get_user(
 async def update_user(
     user_id: str,
     body: UpdateUserRequest,
-    _admin: AuthenticatedUser = Depends(require_admin),
+    _admin: ManageUsersUser,
 ):
     """Update user role, domain, subscription tier, or active status.
 

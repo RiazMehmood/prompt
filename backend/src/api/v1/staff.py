@@ -7,7 +7,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from src.api.dependencies import AuthenticatedUser, require_root_admin
+from src.api.dependencies import AuthenticatedUser, get_current_user, require_root_admin
 from src.db.supabase_client import get_supabase_admin
 
 router = APIRouter()
@@ -148,9 +148,18 @@ async def create_staff(
 @router.get("/{staff_id}/permissions")
 async def get_staff_permissions(
     staff_id: str,
-    _admin: AuthenticatedUser = Depends(require_root_admin),
+    current_user: AuthenticatedUser = Depends(get_current_user),
 ):
-    """Get all permission scopes for a staff member."""
+    """Get permission scopes for a staff member.
+
+    Staff can only fetch their own permissions; root_admin can fetch any.
+    """
+    if current_user.role != "root_admin" and current_user.id != staff_id:
+        from fastapi import HTTPException, status
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "FORBIDDEN", "message": "Cannot view another staff member's permissions"},
+        )
     supabase = get_supabase_admin()
     resp = supabase.table("staff_permissions").select(
         "id, permission, domain_id, created_at, domains(name)"

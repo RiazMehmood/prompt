@@ -1,11 +1,9 @@
 """FastAPI dependency injection — JWT validation and user context extraction."""
-from typing import Annotated, Optional
+from typing import Annotated, Callable, Optional
 
 import structlog
 from fastapi import Depends, Header, HTTPException, status
-from jose import JWTError, jwt
 
-from src.config import settings
 from src.db.supabase_client import get_supabase_admin
 from src.models.user import UserProfile, UserRole
 
@@ -205,6 +203,33 @@ async def require_admin(
     return current_user
 
 
+def require_permission(*permissions: str) -> Callable:
+    """Factory: returns a dependency that passes for root_admin, domain_admin, or
+    a staff member who has ANY of the listed permission scopes in staff_permissions."""
+
+    async def _dep(
+        current_user: Annotated[AuthenticatedUser, Depends(get_current_user)],
+    ) -> AuthenticatedUser:
+        if current_user.role in (UserRole.root_admin, UserRole.domain_admin):
+            return current_user
+        if current_user.role == UserRole.staff:
+            supabase = get_supabase_admin()
+            resp = supabase.table("staff_permissions").select("permission").eq(
+                "staff_id", current_user.id
+            ).in_("permission", list(permissions)).execute()
+            if resp.data:
+                return current_user
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "FORBIDDEN",
+                "message": f"One of permissions {list(permissions)} required",
+            },
+        )
+
+    return _dep
+
+
 # Convenience type aliases for use in route handlers
 CurrentUser = Annotated[AuthenticatedUser, Depends(get_current_user)]
 DomainAdminUser = Annotated[AuthenticatedUser, Depends(require_domain_admin)]
@@ -212,3 +237,12 @@ RootAdminUser = Annotated[AuthenticatedUser, Depends(require_root_admin)]
 DomainAssignedUser = Annotated[AuthenticatedUser, Depends(require_domain_assigned)]
 GenerateLimitedUser = Annotated[AuthenticatedUser, Depends(check_generate_limit)]
 UploadLimitedUser = Annotated[AuthenticatedUser, Depends(check_upload_limit)]
+
+# Staff-permission-aware dependency aliases (any matching permission grants access)
+ApproveDocumentsUser = Annotated[AuthenticatedUser, Depends(require_permission("approve_documents"))]
+ViewAnalyticsUser    = Annotated[AuthenticatedUser, Depends(require_permission("view_analytics"))]
+ManageUsersUser      = Annotated[AuthenticatedUser, Depends(require_permission("manage_all_users", "manage_domain_users"))]
+ManageTemplatesUser  = Annotated[AuthenticatedUser, Depends(require_permission("manage_templates"))]
+ManagePaymentsUser   = Annotated[AuthenticatedUser, Depends(require_permission("manage_payments"))]
+ManageInstitutesUser = Annotated[AuthenticatedUser, Depends(require_permission("manage_institutes"))]
+ManageSubsUser       = Annotated[AuthenticatedUser, Depends(require_permission("manage_subscriptions", "manage_all_users"))]
