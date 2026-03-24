@@ -98,6 +98,7 @@ async def conversation(
                 document_ready=agent_result.get("document_ready", False),
                 document_content=agent_result.get("document_content"),
                 document_id=agent_result.get("document_id"),
+                needs_fir_upload=agent_result.get("needs_fir_upload", False),
             )
 
     # ── Normal RAG chat ───────────────────────────────────────────────────────

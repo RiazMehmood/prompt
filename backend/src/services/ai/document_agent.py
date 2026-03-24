@@ -110,8 +110,57 @@ class DocumentAgentService:
             template = await self._detect_intent(message, templates, domain_name)
             if not template:
                 return None  # Normal chat message
+
+            # For FIR-based documents (bail application etc.) in Legal domain:
+            # if no FIR context is available, ask the lawyer to upload the FIR first
+            FIR_DEPENDENT_TEMPLATES = {"bail application", "vakalatnama", "legal notice", "direct criminal complaint"}
+            is_fir_dependent = any(name in template["name"].lower() for name in FIR_DEPENDENT_TEMPLATES)
+            if is_fir_dependent and domain_name == "Legal" and not fir_context:
+                # Store pending template intent so next message picks it up
+                _SESSIONS[session_id] = {
+                    "mode": "awaiting_fir",
+                    "pending_template": template,
+                    "domain_namespace": domain_namespace,
+                    "domain_name": domain_name,
+                    "professional_details": professional_details or {},
+                    "user_id": user_id,
+                }
+                return {
+                    "reply": (
+                        f"To draft a **{template['name']}**, I need the FIR (First Information Report) details.\n\n"
+                        f"📋 **Please upload the FIR document** — I can read Urdu/Sindhi photocopies and scans.\n\n"
+                        f"Once uploaded, I will automatically extract all case details (FIR number, accused, sections, "
+                        f"police station, etc.) and use them to prepare a professional bail application with strong grounds."
+                    ),
+                    "document_ready": False,
+                    "needs_fir_upload": True,
+                }
+
             state = self._init_state(session_id, template, domain_namespace, professional_details or {}, user_id, domain_name, fir_context)
             return {"reply": self._build_info_request(state), "document_ready": False}
+
+        # If awaiting FIR upload — check if FIR context has now arrived
+        if state.get("mode") == "awaiting_fir":
+            if fir_context:
+                template = state["pending_template"]
+                new_state = self._init_state(
+                    session_id, template,
+                    state["domain_namespace"],
+                    state.get("professional_details", {}),
+                    state.get("user_id"),
+                    state["domain_name"],
+                    fir_context,
+                )
+                return {"reply": self._build_info_request(new_state), "document_ready": False}
+            # Still no FIR
+            return {
+                "reply": (
+                    "I'm still waiting for the FIR document. Please use the **📋 FIR** button in the chat bar "
+                    "to upload the FIR image or PDF, then I'll proceed with the bail application."
+                ),
+                "document_ready": False,
+                "needs_fir_upload": True,
+            }
 
         mode = state.get("mode")
 

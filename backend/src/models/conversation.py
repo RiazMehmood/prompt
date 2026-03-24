@@ -31,3 +31,4 @@ class ConversationResponse(BaseModel):
     document_ready: bool = False
     document_content: Optional[str] = None
     document_id: Optional[str] = None
+    needs_fir_upload: bool = False  # True when AI needs FIR to proceed

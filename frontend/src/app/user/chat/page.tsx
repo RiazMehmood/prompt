@@ -10,6 +10,7 @@ interface Message {
   documentContent?: string;
   documentId?: string;
   documentReady?: boolean;
+  needsFirUpload?: boolean;
 }
 
 interface ChatSession {
@@ -1068,6 +1069,7 @@ export default function UserChatPage() {
         document_ready: boolean;
         document_content?: string;
         document_id?: string;
+        needs_fir_upload?: boolean;
       }>('/api/conversation', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1080,6 +1082,7 @@ export default function UserChatPage() {
         documentReady: res.document_ready,
         documentContent: res.document_content,
         documentId: res.document_id,
+        needsFirUpload: res.needs_fir_upload,
       };
 
       setActive(prev => ({
@@ -1324,6 +1327,16 @@ export default function UserChatPage() {
               >
                 {m.role === 'assistant' ? renderMarkdown(m.content ?? '') : m.content}
               </div>
+              {/* FIR upload prompt — shown inline when AI needs FIR to continue */}
+              {m.needsFirUpload && firStep === 'idle' && (
+                <button
+                  onClick={() => firFileRef.current?.click()}
+                  className="mt-2 flex items-center gap-2 px-4 py-2.5 bg-gray-900 text-white rounded-xl text-sm font-semibold hover:bg-gray-700 transition shadow-sm"
+                >
+                  <span>📋</span>
+                  Upload FIR Document
+                </button>
+              )}
               {m.documentReady && m.documentContent && (
                 <DocumentCard content={m.documentContent} docId={m.documentId} />
               )}
