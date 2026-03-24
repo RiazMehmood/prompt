@@ -732,6 +732,9 @@ export default function UserChatPage() {
   const [cases, setCases]               = useState<Case[]>([]);
   const [savingCase, setSavingCase]     = useState(false);
 
+  // FIR context: structured fields cached for current session so any template auto-fills
+  const [sessionFirFields, setSessionFirFields] = useState<Record<string, string | null> | null>(null);
+
   // FIR extraction state
   const [firStep, setFirStep]             = useState<'idle' | 'scanning' | 'reviewing'>('idle');
   const [firScanMsg, setFirScanMsg]       = useState('');
@@ -811,6 +814,7 @@ export default function UserChatPage() {
     }
     setActive(newSession());
     setInput('');
+    setSessionFirFields(null);
   }
 
   function selectSession(sess: ChatSession) {
@@ -923,6 +927,8 @@ export default function UserChatPage() {
     const mergedFields: Record<string, string | null> = { ...firResult.fields };
     for (const [k, v] of Object.entries(firEdited)) { if (v) mergedFields[k] = v; }
 
+    // Cache FIR fields in session so any subsequent template also gets auto-filled
+    setSessionFirFields(mergedFields);
     setFirStep('idle');
     setFirResult(null);
     setFirEdited({});
@@ -943,6 +949,8 @@ export default function UserChatPage() {
       for (const [k, v] of Object.entries(firEdited)) {
         if (v) merged[k] = v;
       }
+      // Cache FIR fields so templates picked after saving still auto-fill
+      setSessionFirFields(merged);
       const token = localStorage.getItem('auth_token') || localStorage.getItem('admin_token');
       const res = await fetch(`${API_BASE}/api/cases`, {
         method: 'POST',
@@ -1051,7 +1059,9 @@ export default function UserChatPage() {
 
     try {
       const payload: Record<string, unknown> = { message: text, session_id: updatedSession.backendSessionId };
-      if (firFields) payload.fir_fields = firFields;
+      // Include FIR fields: explicit (from applyFIRToChat) or session-cached (from any previous FIR upload)
+      const fieldsToSend = firFields ?? sessionFirFields;
+      if (fieldsToSend) payload.fir_fields = fieldsToSend;
 
       const res = await apiFetch<{
         reply: string;

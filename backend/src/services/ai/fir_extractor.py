@@ -242,13 +242,51 @@ class FIRExtractor:
 
     # ── Merge helpers ──────────────────────────────────────────────────────────
 
-    @staticmethod
-    def _merge(p1: dict, p2: dict) -> dict:
+    # Sentinel values Gemini returns when it cannot read a field — treat as null
+    _NULL_SENTINELS = frozenset({
+        "unknown", "n/a", "na", "not available", "not found", "not mentioned",
+        "not readable", "not legible", "unreadable", "illegible", "unclear",
+        "not provided", "none", "null", "-", "—", "...", "?",
+    })
+
+    # Fields where multi-line text is valid (narratives, addresses)
+    _MULTILINE_OK = frozenset({"case_summary", "witnesses", "accused_address", "complainant_address"})
+
+    @classmethod
+    def _clean(cls, v: Any) -> Any:
+        """Return None if value is a null sentinel or empty; otherwise return normalised value."""
+        if not v:
+            return None
+        s = str(v).strip()
+        if not s or s.lower() in cls._NULL_SENTINELS:
+            return None
+        return s
+
+    @classmethod
+    def _normalise(cls, key: str, v: Any) -> Any:
+        """Collapse word-per-line formatting for non-narrative fields."""
+        if not v:
+            return v
+        s = str(v)
+        if key in cls._MULTILINE_OK:
+            # Keep paragraphs but collapse excessive blank lines
+            return re.sub(r'\n{3,}', '\n\n', s).strip()
+        # For all other fields: if text has many short lines (word-per-line), join with comma separator
+        lines = [l.strip() for l in s.splitlines() if l.strip()]
+        if len(lines) > 1 and all(len(l.split()) <= 3 for l in lines):
+            # Looks like word-per-line table extraction — join smartly
+            # Try to detect multiple entries (accused list) vs single multi-word value
+            joined = '، '.join(lines) if any('\u0600' <= c <= '\u06ff' for c in s) else ', '.join(lines)
+            return joined
+        return s.strip()
+
+    @classmethod
+    def _merge(cls, p1: dict, p2: dict) -> dict:
         """Merge two pass results: prefer longer/more complete non-null values."""
         out: dict[str, Any] = {}
         for k in FIELD_KEYS:
-            v1 = p1.get(k) or None
-            v2 = p2.get(k) or None
+            v1 = cls._clean(p1.get(k))
+            v2 = cls._clean(p2.get(k))
             if v1 and v2:
                 out[k] = v1 if len(str(v1)) >= len(str(v2)) else v2
             else:
@@ -291,8 +329,8 @@ class FIRExtractor:
         return self._merge(merged12, pass3)
 
     def _build_result(self, fields: dict) -> dict[str, Any]:
-        for k in FIELD_KEYS:
-            fields.setdefault(k, None)
+        # Clean sentinel values then normalise formatting
+        fields = {k: self._normalise(k, self._clean(fields.get(k))) for k in FIELD_KEYS}
         filled = sum(1 for v in fields.values() if v)
         critical_missing = [f["key"] for f in FIR_FIELDS if f["critical"] and not fields.get(f["key"])]
         confidence = round(filled / len(FIELD_KEYS), 2)
