@@ -82,6 +82,7 @@ PROFILE_SLOT_MAP: dict[str, str] = {
     "court_name":        "court_name",
     "bar_number":        "bar_number",
     "bar_registration":  "bar_number",
+    "bar_council":       "bar_council",   # e.g. "Sindh Bar Council" / "Karachi Bar Association"
     "designation":       "designation",
     "organization":      "organization",
     "city":              "city",

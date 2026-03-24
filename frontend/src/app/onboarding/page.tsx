@@ -25,11 +25,11 @@ const DOMAIN_META: Record<string, { icon: string; color: string; border: string;
     profLabel: 'Educator',
   },
   Medical: {
-    icon: '🏥',
+    icon: '🩺',
     color: 'bg-red-50 hover:bg-red-100',
     border: 'border-red-200 hover:border-red-400',
-    examples: ['Clinical notes', 'Patient education', 'Medical documentation'],
-    profLabel: 'Medical Professional',
+    examples: ['FCPS MCQ practice', 'AI tutor explanations', 'Weak topic analysis'],
+    profLabel: 'Medical Postgraduate',
   },
 };
 
@@ -39,7 +39,8 @@ const PROF_FIELDS: Record<string, { key: string; label: string; placeholder: str
     { key: 'full_name',   label: 'Full Name',            placeholder: 'Advocate Muhammad Raza',        required: true  },
     { key: 'court_name',  label: 'Primary Court',        placeholder: 'Lahore High Court',             required: true  },
     { key: 'bar_number',  label: 'Bar Registration No.', placeholder: 'e.g. LHC/2020/12345',          required: false },
-    { key: 'city',        label: 'City',                 placeholder: 'Lahore',                        required: false },
+    { key: 'bar_council', label: 'Bar Council / Association', placeholder: 'e.g. Sindh Bar Council',  required: false },
+    { key: 'city',        label: 'City',                 placeholder: 'Karachi',                       required: false },
   ],
   Education: [
     { key: 'full_name',    label: 'Full Name',         placeholder: 'Prof. Amina Khan',                 required: true  },
@@ -49,9 +50,9 @@ const PROF_FIELDS: Record<string, { key: string; label: string; placeholder: str
   ],
   Medical: [
     { key: 'full_name',    label: 'Full Name',         placeholder: 'Dr. Zainab Hassan',                required: true  },
-    { key: 'organization', label: 'Hospital/Clinic',   placeholder: 'Aga Khan University Hospital',     required: true  },
-    { key: 'designation',  label: 'Specialization',    placeholder: 'Cardiologist',                     required: false },
-    { key: 'city',         label: 'City',              placeholder: 'Islamabad',                        required: false },
+    { key: 'organization', label: 'Medical College / Institution', placeholder: 'Dow University of Health Sciences', required: false },
+    { key: 'designation',  label: 'Current Stage',     placeholder: 'e.g. FCPS Part 1 Candidate, PGR Year 2', required: false },
+    { key: 'city',         label: 'City',              placeholder: 'Karachi',                          required: false },
   ],
 };
 

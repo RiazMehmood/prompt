@@ -94,8 +94,8 @@ async def update_profile(
     """Update the current user's professional details (name, court, bar number, etc.)."""
     from src.db.supabase_client import get_supabase_admin
     allowed = {
-        "full_name", "court_name", "bar_number", "designation",
-        "organization", "city", "phone",
+        "full_name", "court_name", "bar_number", "bar_council",
+        "designation", "organization", "city", "phone",
     }
     details = {k: v for k, v in body.items() if k in allowed and v is not None}
     if not details:
