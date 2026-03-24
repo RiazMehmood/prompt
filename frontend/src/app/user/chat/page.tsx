@@ -21,6 +21,21 @@ interface ChatSession {
   updatedAt: string;
 }
 
+interface Template {
+  id: string;
+  name: string;
+  description: string;
+  slot_definitions: { name: string; label: string; required: boolean; data_source: string }[];
+}
+
+interface KbDocument {
+  id: string;
+  filename: string;
+  status: string;
+  document_type: string;
+  created_at: string;
+}
+
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const SESSIONS_KEY = 'chat_sessions_v2';
@@ -151,11 +166,7 @@ function DocumentCard({ content, docId }: { content: string; docId?: string }) {
 }
 
 function SessionSidebar({
-  sessions,
-  activeId,
-  onSelect,
-  onNew,
-  onDelete,
+  sessions, activeId, onSelect, onNew, onDelete,
 }: {
   sessions: ChatSession[];
   activeId: string;
@@ -164,10 +175,8 @@ function SessionSidebar({
   onDelete: (id: string) => void;
 }) {
   const groups = groupByDate(sessions);
-
   return (
     <div className="flex flex-col h-full bg-gray-950 text-white w-64 shrink-0">
-      {/* Header */}
       <div className="p-3 border-b border-gray-800">
         <button
           onClick={onNew}
@@ -179,8 +188,6 @@ function SessionSidebar({
           New chat
         </button>
       </div>
-
-      {/* Session list */}
       <div className="flex-1 overflow-y-auto py-2 space-y-4">
         {groups.length === 0 && (
           <p className="text-xs text-gray-500 text-center mt-6">No previous chats</p>
@@ -194,9 +201,7 @@ function SessionSidebar({
               <div
                 key={session.id}
                 className={`group relative mx-2 my-0.5 flex items-center rounded-lg cursor-pointer transition ${
-                  session.id === activeId
-                    ? 'bg-gray-700 text-white'
-                    : 'text-gray-400 hover:bg-gray-800 hover:text-white'
+                  session.id === activeId ? 'bg-gray-700 text-white' : 'text-gray-400 hover:bg-gray-800 hover:text-white'
                 }`}
                 onClick={() => onSelect(session)}
               >
@@ -214,6 +219,152 @@ function SessionSidebar({
             ))}
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Right Sidebar — Templates + Knowledge Base ────────────────────────────────
+
+function RightSidebar({
+  templates,
+  kbDocs,
+  domainName,
+  onUseTemplate,
+  onReferenceDoc,
+  loadingData,
+}: {
+  templates: Template[];
+  kbDocs: KbDocument[];
+  domainName: string | null;
+  onUseTemplate: (name: string) => void;
+  onReferenceDoc: (filename: string) => void;
+  loadingData: boolean;
+}) {
+  const [activeTab, setActiveTab] = useState<'templates' | 'knowledge'>('templates');
+
+  const statusColor = (status: string) => {
+    if (status === 'approved') return 'bg-green-100 text-green-700';
+    if (status === 'pending') return 'bg-yellow-100 text-yellow-700';
+    if (status === 'rejected') return 'bg-red-100 text-red-700';
+    return 'bg-gray-100 text-gray-500';
+  };
+
+  return (
+    <div className="flex flex-col h-full bg-white border-l border-gray-200 w-64 shrink-0">
+      {/* Header */}
+      <div className="px-4 pt-4 pb-2 border-b border-gray-100">
+        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+          {domainName ? `${domainName} Resources` : 'Resources'}
+        </p>
+        <div className="flex rounded-lg bg-gray-100 p-0.5">
+          <button
+            onClick={() => setActiveTab('templates')}
+            className={`flex-1 py-1.5 text-xs font-medium rounded-md transition ${
+              activeTab === 'templates' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            Templates
+          </button>
+          <button
+            onClick={() => setActiveTab('knowledge')}
+            className={`flex-1 py-1.5 text-xs font-medium rounded-md transition ${
+              activeTab === 'knowledge' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            Knowledge Base
+          </button>
+        </div>
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto">
+        {loadingData ? (
+          <div className="flex items-center justify-center h-24">
+            <div className="flex gap-1">
+              <span className="w-1.5 h-1.5 bg-gray-300 rounded-full animate-bounce [animation-delay:0ms]" />
+              <span className="w-1.5 h-1.5 bg-gray-300 rounded-full animate-bounce [animation-delay:150ms]" />
+              <span className="w-1.5 h-1.5 bg-gray-300 rounded-full animate-bounce [animation-delay:300ms]" />
+            </div>
+          </div>
+        ) : activeTab === 'templates' ? (
+          <div className="py-2">
+            {templates.length === 0 ? (
+              <p className="text-xs text-gray-400 text-center mt-6 px-4">No templates available for your domain</p>
+            ) : (
+              templates.map(t => (
+                <button
+                  key={t.id}
+                  onClick={() => onUseTemplate(t.name)}
+                  className="w-full text-left px-4 py-3 hover:bg-gray-50 transition border-b border-gray-50 group"
+                >
+                  <div className="flex items-start gap-2">
+                    <span className="text-base mt-0.5 shrink-0">📄</span>
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold text-gray-800 group-hover:text-blue-600 transition leading-tight">
+                        {t.name}
+                      </p>
+                      {t.description && (
+                        <p className="text-xs text-gray-400 mt-0.5 leading-tight line-clamp-2">
+                          {t.description}
+                        </p>
+                      )}
+                      <p className="text-xs text-gray-300 mt-1">
+                        {t.slot_definitions?.length ?? 0} fields
+                      </p>
+                    </div>
+                  </div>
+                  <p className="text-xs text-blue-400 mt-1.5 opacity-0 group-hover:opacity-100 transition pl-6">
+                    Click to use →
+                  </p>
+                </button>
+              ))
+            )}
+          </div>
+        ) : (
+          <div className="py-2">
+            {kbDocs.length === 0 ? (
+              <div className="px-4 mt-6 text-center">
+                <p className="text-xs text-gray-400">No documents in knowledge base yet</p>
+                <p className="text-xs text-gray-300 mt-1">Upload documents via the admin panel to enable AI-assisted auto-fill</p>
+              </div>
+            ) : (
+              kbDocs.map(doc => (
+                <button
+                  key={doc.id}
+                  onClick={() => onReferenceDoc(doc.filename)}
+                  className="w-full text-left px-4 py-3 hover:bg-gray-50 transition border-b border-gray-50 group"
+                >
+                  <div className="flex items-start gap-2">
+                    <span className="text-base mt-0.5 shrink-0">📎</span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-medium text-gray-700 leading-tight break-all line-clamp-2">
+                        {doc.filename}
+                      </p>
+                      <div className="flex items-center gap-1.5 mt-1">
+                        <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${statusColor(doc.status)}`}>
+                          {doc.status}
+                        </span>
+                        <span className="text-xs text-gray-300">
+                          {new Date(doc.created_at).toLocaleDateString()}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </button>
+              ))
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Footer hint */}
+      <div className="px-4 py-3 border-t border-gray-100">
+        <p className="text-xs text-gray-300 text-center leading-tight">
+          {activeTab === 'templates'
+            ? 'Click a template to start drafting it in chat'
+            : 'Knowledge base documents power AI auto-fill'}
+        </p>
       </div>
     </div>
   );
@@ -279,50 +430,63 @@ const DEFAULT_DOMAIN_UI: DomainUI = {
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function UserChatPage() {
-  const [sessions, setSessions]   = useState<ChatSession[]>([]);
-  const [active, setActive]       = useState<ChatSession>(() => newSession());
-  const [input, setInput]         = useState('');
-  const [loading, setLoading]     = useState(false);
-  const [uploading, setUploading] = useState(false);
+  const [sessions, setSessions]     = useState<ChatSession[]>([]);
+  const [active, setActive]         = useState<ChatSession>(() => newSession());
+  const [input, setInput]           = useState('');
+  const [loading, setLoading]       = useState(false);
+  const [uploading, setUploading]   = useState(false);
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
-  // Read cached domain name synchronously on first render, then refresh from API
+  const [templates, setTemplates]   = useState<Template[]>([]);
+  const [kbDocs, setKbDocs]         = useState<KbDocument[]>([]);
+  const [loadingData, setLoadingData] = useState(true);
+
   const [domainName, setDomainName] = useState<string | null>(() => {
     if (typeof window === 'undefined') return null;
     return localStorage.getItem('domain_name');
   });
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const fileRef   = useRef<HTMLInputElement>(null);
-  const initialised = useRef(false);
 
-  // Load sessions from localStorage on mount + fetch domain name
+  const bottomRef    = useRef<HTMLDivElement>(null);
+  const fileRef      = useRef<HTMLInputElement>(null);
+  const textareaRef  = useRef<HTMLTextAreaElement>(null);
+  const initialised  = useRef(false);
+
+  // ── Initialise ────────────────────────────────────────────────────────────
+
   useEffect(() => {
     if (initialised.current) return;
     initialised.current = true;
-    const saved = loadSessions();
-    setSessions(saved);
+
+    setSessions(loadSessions());
     setActive(newSession());
 
-    // Fetch domain name from API and cache it in localStorage
     const token = localStorage.getItem('auth_token') || localStorage.getItem('admin_token');
-    if (token) {
-      fetch(`${API_BASE}/auth/me`, { headers: { Authorization: `Bearer ${token}` } })
-        .then(r => r.ok ? r.json() : null)
-        .then(data => {
-          if (data?.domain_name) {
-            localStorage.setItem('domain_name', data.domain_name);
-            setDomainName(data.domain_name);
-          }
-        })
-        .catch(() => {});
-    }
+    if (!token) return;
+
+    const headers = { Authorization: `Bearer ${token}` };
+
+    // Fetch domain name, templates, and KB docs in parallel
+    Promise.all([
+      fetch(`${API_BASE}/auth/me`, { headers }).then(r => r.ok ? r.json() : null),
+      fetch(`${API_BASE}/api/templates`, { headers }).then(r => r.ok ? r.json() : []),
+      fetch(`${API_BASE}/api/documents?doc_status=approved`, { headers }).then(r => r.ok ? r.json() : []),
+    ]).then(([me, tmpl, docs]) => {
+      if (me?.domain_name) {
+        localStorage.setItem('domain_name', me.domain_name);
+        setDomainName(me.domain_name);
+      }
+      setTemplates(Array.isArray(tmpl) ? tmpl : []);
+      setKbDocs(Array.isArray(docs) ? docs : []);
+    }).catch(() => {}).finally(() => setLoadingData(false));
   }, []);
 
-  // Scroll to bottom on new messages
+  // ── Scroll to bottom ──────────────────────────────────────────────────────
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [active.messages, loading]);
 
-  // Persist current session into sessions list whenever messages change
+  // ── Persist sessions ──────────────────────────────────────────────────────
+
   const persistSession = useCallback((sess: ChatSession) => {
     if (sess.messages.length === 0) return;
     setSessions(prev => {
@@ -333,21 +497,16 @@ export default function UserChatPage() {
 
   useEffect(() => {
     if (!initialised.current) return;
-    if (active.messages.length > 0) {
-      persistSession(active);
-    }
+    if (active.messages.length > 0) persistSession(active);
   }, [active.messages]);
 
   useEffect(() => {
-    if (initialised.current) {
-      saveSessions(sessions);
-    }
+    if (initialised.current) saveSessions(sessions);
   }, [sessions]);
 
-  // ── Actions ──────────────────────────────────────────────────────────────
+  // ── Session actions ───────────────────────────────────────────────────────
 
   function startNewChat() {
-    // Save current session if it has messages
     if (active.messages.length > 0) {
       setSessions(prev => {
         const without = prev.filter(s => s.id !== active.id);
@@ -359,7 +518,6 @@ export default function UserChatPage() {
   }
 
   function selectSession(sess: ChatSession) {
-    // Save current if it has messages before switching
     if (active.messages.length > 0 && active.id !== sess.id) {
       setSessions(prev => {
         const without = prev.filter(s => s.id !== active.id);
@@ -374,6 +532,22 @@ export default function UserChatPage() {
     setSessions(prev => prev.filter(s => s.id !== id));
     if (active.id === id) setActive(newSession());
   }
+
+  // ── Right sidebar actions ─────────────────────────────────────────────────
+
+  function handleUseTemplate(name: string) {
+    const msg = `Write a ${name}`;
+    setInput(msg);
+    textareaRef.current?.focus();
+  }
+
+  function handleReferenceDoc(filename: string) {
+    const base = filename.replace(/\.[^.]+$/, '');
+    setInput(prev => prev ? `${prev} (referencing "${base}")` : `Using "${base}" as reference, `);
+    textareaRef.current?.focus();
+  }
+
+  // ── Send message ──────────────────────────────────────────────────────────
 
   async function send(overrideText?: string) {
     const text = (overrideText ?? input).trim();
@@ -417,7 +591,6 @@ export default function UserChatPage() {
       }));
     } catch (err: any) {
       if (err?.status === 401) {
-        // Token expired — redirect to login
         localStorage.removeItem('auth_token');
         localStorage.removeItem('auth_user');
         localStorage.removeItem('domain_name');
@@ -466,22 +639,14 @@ export default function UserChatPage() {
         const fields = Object.entries(data.extracted_fields)
           .map(([k, v]) => `${k.replace(/_/g, ' ')}: ${v}`)
           .join('\n');
-        // Pre-fill the input with the extracted data as a natural language message
-        const preMessage =
-          `I've uploaded a document. Here are the extracted details:\n${fields}\n\nPlease use these to fill in the required fields.`;
-        await send(preMessage);
+        await send(`I've uploaded a document. Here are the extracted details:\n${fields}\n\nPlease use these to fill in the required fields.`);
       } else {
-        const userMsg: Message = {
-          role: 'user',
-          content: `[Uploaded: ${file.name}]`,
-        };
-        const infoMsg: Message = {
-          role: 'assistant',
-          content: `I received your document **${file.name}** but couldn't extract recognisable fields from it. Please provide the case details manually.`,
-        };
         setActive(prev => ({
           ...prev,
-          messages: [...prev.messages, userMsg, infoMsg],
+          messages: [...prev.messages,
+            { role: 'user', content: `[Uploaded: ${file.name}]` },
+            { role: 'assistant', content: `I received **${file.name}** but couldn't extract recognisable fields. Please provide the case details manually.` },
+          ],
           updatedAt: new Date().toISOString(),
         }));
       }
@@ -501,9 +666,12 @@ export default function UserChatPage() {
 
   // ── Render ────────────────────────────────────────────────────────────────
 
+  const domainUI = (domainName && DOMAIN_UI[domainName]) ? DOMAIN_UI[domainName] : DEFAULT_DOMAIN_UI;
+
   return (
     <div className="flex -mx-8 -my-8 overflow-hidden" style={{ height: 'calc(100vh - 0px)' }}>
-      {/* Chat session sidebar — hover to expand */}
+
+      {/* LEFT: Chat session sidebar — hover to expand */}
       <div
         className={`relative shrink-0 h-full transition-all duration-200 ease-in-out overflow-hidden ${
           sidebarExpanded ? 'w-64' : 'w-1.5'
@@ -522,14 +690,12 @@ export default function UserChatPage() {
         </div>
       </div>
 
-      {/* Main chat area */}
+      {/* CENTRE: Main chat area */}
       <div className="flex-1 flex flex-col bg-gray-50 min-w-0 overflow-hidden">
+
         {/* Top bar */}
         <div className="flex items-center gap-3 px-5 py-3.5 bg-white border-b border-gray-200 shrink-0">
-          <div
-            className="p-1.5 rounded-lg text-gray-400 cursor-pointer"
-            title="Hover left edge to see chat history"
-          >
+          <div className="p-1.5 rounded-lg text-gray-400" title="Hover left edge to see chat history">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
             </svg>
@@ -538,6 +704,11 @@ export default function UserChatPage() {
             <h1 className="text-sm font-semibold text-gray-800 truncate">{active.title}</h1>
             <p className="text-xs text-gray-400">Hover left edge to see chat history</p>
           </div>
+          {domainName && (
+            <span className="text-xs px-2.5 py-1 bg-gray-100 text-gray-500 rounded-full font-medium">
+              {domainUI.icon} {domainName}
+            </span>
+          )}
           <button
             onClick={startNewChat}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-500 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition"
@@ -552,21 +723,34 @@ export default function UserChatPage() {
 
         {/* Messages */}
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
-          {active.messages.length === 0 && (() => {
-            const ui = (domainName && DOMAIN_UI[domainName]) ? DOMAIN_UI[domainName] : DEFAULT_DOMAIN_UI;
-            return (
-              <div className="text-center py-20 text-gray-400">
-                <div className="text-5xl mb-4">{ui.icon}</div>
-                <p className="text-sm font-medium text-gray-600">How can I help you today?</p>
-                {domainName && (
-                  <p className="text-xs text-gray-400 mt-1">{domainName} domain</p>
-                )}
-                <div className="mt-5 space-y-2 text-xs text-gray-400">
-                  {ui.suggestions.map((s, i) => <p key={i}>{s}</p>)}
-                </div>
+          {active.messages.length === 0 && (
+            <div className="text-center py-20 text-gray-400">
+              <div className="text-5xl mb-4">{domainUI.icon}</div>
+              <p className="text-sm font-medium text-gray-600">How can I help you today?</p>
+              {domainName && (
+                <p className="text-xs text-gray-400 mt-1">{domainName} domain</p>
+              )}
+              <div className="mt-5 space-y-2 text-xs text-gray-400">
+                {domainUI.suggestions.map((s, i) => <p key={i}>{s}</p>)}
               </div>
-            );
-          })()}
+              {templates.length > 0 && (
+                <div className="mt-6 text-xs text-gray-400">
+                  <p className="font-medium text-gray-500 mb-2">Quick start — click a template:</p>
+                  <div className="flex flex-wrap gap-2 justify-center">
+                    {templates.slice(0, 4).map(t => (
+                      <button
+                        key={t.id}
+                        onClick={() => handleUseTemplate(t.name)}
+                        className="px-3 py-1.5 bg-white border border-gray-200 rounded-full text-xs text-gray-600 hover:bg-gray-50 hover:border-gray-300 transition shadow-sm"
+                      >
+                        📄 {t.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {active.messages.map((m, i) => (
             <div key={i} className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'}`}>
@@ -602,7 +786,6 @@ export default function UserChatPage() {
         {/* Input bar */}
         <div className="px-6 pb-5 pt-3 bg-white border-t border-gray-200 shrink-0">
           <div className="flex gap-2 items-end max-w-3xl mx-auto">
-            {/* File upload */}
             <input
               ref={fileRef}
               type="file"
@@ -613,7 +796,7 @@ export default function UserChatPage() {
             <button
               onClick={() => fileRef.current?.click()}
               disabled={loading || uploading}
-              title="Upload document to auto-fill fields"
+              title={domainUI.uploadHint}
               className="p-3 rounded-xl border border-gray-200 text-gray-400 hover:text-gray-700 hover:bg-gray-50 disabled:opacity-40 transition shrink-0"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
@@ -622,11 +805,12 @@ export default function UserChatPage() {
             </button>
 
             <textarea
+              ref={textareaRef}
               rows={1}
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={handleKey}
-              placeholder={(domainName && DOMAIN_UI[domainName] ? DOMAIN_UI[domainName] : DEFAULT_DOMAIN_UI).placeholder}
+              placeholder={domainUI.placeholder}
               className="flex-1 resize-none px-4 py-3 rounded-2xl border border-gray-200 text-sm focus:outline-none focus:border-gray-400 transition bg-white"
               style={{ maxHeight: '120px', overflowY: 'auto' }}
             />
@@ -638,11 +822,19 @@ export default function UserChatPage() {
               Send
             </button>
           </div>
-          <p className="text-center text-xs text-gray-300 mt-2">
-            {(domainName && DOMAIN_UI[domainName] ? DOMAIN_UI[domainName] : DEFAULT_DOMAIN_UI).uploadHint}
-          </p>
+          <p className="text-center text-xs text-gray-300 mt-2">{domainUI.uploadHint}</p>
         </div>
       </div>
+
+      {/* RIGHT: Templates + Knowledge Base sidebar */}
+      <RightSidebar
+        templates={templates}
+        kbDocs={kbDocs}
+        domainName={domainName}
+        onUseTemplate={handleUseTemplate}
+        onReferenceDoc={handleReferenceDoc}
+        loadingData={loadingData}
+      />
     </div>
   );
 }
