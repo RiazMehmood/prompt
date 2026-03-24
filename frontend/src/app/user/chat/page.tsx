@@ -242,10 +242,15 @@ function RightSidebar({
   loadingData: boolean;
 }) {
   const [activeTab, setActiveTab] = useState<'templates' | 'knowledge'>('templates');
+  const [search, setSearch] = useState('');
+
+  const q = search.toLowerCase().trim();
+  const filteredTemplates = q ? templates.filter(t => t.name.toLowerCase().includes(q) || t.description?.toLowerCase().includes(q)) : templates;
+  const filteredDocs      = q ? kbDocs.filter(d => d.filename.toLowerCase().includes(q) || d.document_type?.toLowerCase().includes(q)) : kbDocs;
 
   const statusColor = (status: string) => {
     if (status === 'approved') return 'bg-green-100 text-green-700';
-    if (status === 'pending') return 'bg-yellow-100 text-yellow-700';
+    if (status === 'pending')  return 'bg-yellow-100 text-yellow-700';
     if (status === 'rejected') return 'bg-red-100 text-red-700';
     return 'bg-gray-100 text-gray-500';
   };
@@ -253,10 +258,33 @@ function RightSidebar({
   return (
     <div className="flex flex-col h-full bg-white border-l border-gray-200 w-64 shrink-0">
       {/* Header */}
-      <div className="px-4 pt-4 pb-2 border-b border-gray-100">
-        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+      <div className="px-3 pt-3 pb-2 border-b border-gray-100 space-y-2">
+        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
           {domainName ? `${domainName} Resources` : 'Resources'}
         </p>
+
+        {/* Search */}
+        <div className="relative">
+          <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z" />
+          </svg>
+          <input
+            type="text"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search templates & docs…"
+            className="w-full pl-8 pr-7 py-1.5 text-xs border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 bg-gray-50 placeholder-gray-400"
+          />
+          {search && (
+            <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          )}
+        </div>
+
+        {/* Tabs */}
         <div className="flex rounded-lg bg-gray-100 p-0.5">
           <button
             onClick={() => setActiveTab('templates')}
@@ -264,7 +292,7 @@ function RightSidebar({
               activeTab === 'templates' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'
             }`}
           >
-            Templates
+            Templates {q && filteredTemplates.length > 0 && <span className="ml-1 text-blue-500">{filteredTemplates.length}</span>}
           </button>
           <button
             onClick={() => setActiveTab('knowledge')}
@@ -272,7 +300,7 @@ function RightSidebar({
               activeTab === 'knowledge' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'
             }`}
           >
-            Knowledge Base
+            KB {q && filteredDocs.length > 0 && <span className="ml-1 text-blue-500">{filteredDocs.length}</span>}
           </button>
         </div>
       </div>
@@ -288,82 +316,65 @@ function RightSidebar({
             </div>
           </div>
         ) : activeTab === 'templates' ? (
-          <div className="py-2">
-            {templates.length === 0 ? (
-              <p className="text-xs text-gray-400 text-center mt-6 px-4">No templates available for your domain</p>
-            ) : (
-              templates.map(t => (
-                <button
-                  key={t.id}
-                  onClick={() => onUseTemplate(t.name)}
-                  className="w-full text-left px-4 py-3 hover:bg-gray-50 transition border-b border-gray-50 group"
-                >
-                  <div className="flex items-start gap-2">
-                    <span className="text-base mt-0.5 shrink-0">📄</span>
-                    <div className="min-w-0">
-                      <p className="text-xs font-semibold text-gray-800 group-hover:text-blue-600 transition leading-tight">
-                        {t.name}
-                      </p>
-                      {t.description && (
-                        <p className="text-xs text-gray-400 mt-0.5 leading-tight line-clamp-2">
-                          {t.description}
-                        </p>
-                      )}
-                      <p className="text-xs text-gray-300 mt-1">
-                        {t.slot_definitions?.length ?? 0} fields
-                      </p>
-                    </div>
+          <div className="py-1">
+            {filteredTemplates.length === 0 ? (
+              <p className="text-xs text-gray-400 text-center mt-6 px-4">
+                {q ? `No templates matching "${search}"` : 'No templates for your domain'}
+              </p>
+            ) : filteredTemplates.map(t => (
+              <button
+                key={t.id}
+                onClick={() => onUseTemplate(t.name)}
+                className="w-full text-left px-3 py-2.5 hover:bg-blue-50 transition border-b border-gray-50 group"
+              >
+                <div className="flex items-start gap-2">
+                  <span className="text-sm mt-0.5 shrink-0">📄</span>
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold text-gray-800 group-hover:text-blue-600 transition leading-tight">{t.name}</p>
+                    {t.description && <p className="text-xs text-gray-400 mt-0.5 leading-tight line-clamp-2">{t.description}</p>}
+                    <p className="text-xs text-gray-300 mt-0.5">{t.slot_definitions?.length ?? 0} fields · tap to draft</p>
                   </div>
-                  <p className="text-xs text-blue-400 mt-1.5 opacity-0 group-hover:opacity-100 transition pl-6">
-                    Click to use →
-                  </p>
-                </button>
-              ))
-            )}
+                </div>
+              </button>
+            ))}
           </div>
         ) : (
-          <div className="py-2">
-            {kbDocs.length === 0 ? (
+          <div className="py-1">
+            {filteredDocs.length === 0 ? (
               <div className="px-4 mt-6 text-center">
-                <p className="text-xs text-gray-400">No documents in knowledge base yet</p>
-                <p className="text-xs text-gray-300 mt-1">Upload documents via the admin panel to enable AI-assisted auto-fill</p>
+                {q
+                  ? <p className="text-xs text-gray-400">No documents matching "{search}"</p>
+                  : <><p className="text-xs text-gray-400">No documents in knowledge base yet</p><p className="text-xs text-gray-300 mt-1">Admin uploads power AI auto-fill</p></>
+                }
               </div>
-            ) : (
-              kbDocs.map(doc => (
-                <button
-                  key={doc.id}
-                  onClick={() => onReferenceDoc(doc.filename)}
-                  className="w-full text-left px-4 py-3 hover:bg-gray-50 transition border-b border-gray-50 group"
-                >
-                  <div className="flex items-start gap-2">
-                    <span className="text-base mt-0.5 shrink-0">📎</span>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-xs font-medium text-gray-700 leading-tight break-all line-clamp-2">
-                        {doc.filename}
-                      </p>
-                      <div className="flex items-center gap-1.5 mt-1">
-                        <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${statusColor(doc.status)}`}>
-                          {doc.status}
-                        </span>
-                        <span className="text-xs text-gray-300">
-                          {new Date(doc.created_at).toLocaleDateString()}
-                        </span>
-                      </div>
+            ) : filteredDocs.map(doc => (
+              <button
+                key={doc.id}
+                onClick={() => onReferenceDoc(doc.filename)}
+                className="w-full text-left px-3 py-2.5 hover:bg-blue-50 transition border-b border-gray-50 group"
+              >
+                <div className="flex items-start gap-2">
+                  <span className="text-sm mt-0.5 shrink-0">📎</span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-medium text-gray-700 leading-tight break-all line-clamp-2 group-hover:text-blue-600 transition">{doc.filename}</p>
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${statusColor(doc.status)}`}>{doc.status}</span>
+                      <span className="text-xs text-gray-300">{new Date(doc.created_at).toLocaleDateString()}</span>
                     </div>
                   </div>
-                </button>
-              ))
-            )}
+                </div>
+              </button>
+            ))}
           </div>
         )}
       </div>
 
-      {/* Footer hint */}
-      <div className="px-4 py-3 border-t border-gray-100">
+      {/* Footer */}
+      <div className="px-3 py-2.5 border-t border-gray-100">
         <p className="text-xs text-gray-300 text-center leading-tight">
           {activeTab === 'templates'
-            ? 'Click a template to start drafting it in chat'
-            : 'Knowledge base documents power AI auto-fill'}
+            ? `${templates.length} templates · click to draft`
+            : `${kbDocs.length} docs in knowledge base`}
         </p>
       </div>
     </div>
@@ -467,8 +478,8 @@ export default function UserChatPage() {
     // Fetch domain name, templates, and KB docs in parallel
     Promise.all([
       fetch(`${API_BASE}/auth/me`, { headers }).then(r => r.ok ? r.json() : null),
-      fetch(`${API_BASE}/api/templates`, { headers }).then(r => r.ok ? r.json() : []),
-      fetch(`${API_BASE}/api/documents?doc_status=approved`, { headers }).then(r => r.ok ? r.json() : []),
+      fetch(`${API_BASE}/templates`, { headers }).then(r => r.ok ? r.json() : []),
+      fetch(`${API_BASE}/documents?doc_status=approved`, { headers }).then(r => r.ok ? r.json() : []),
     ]).then(([me, tmpl, docs]) => {
       if (me?.domain_name) {
         localStorage.setItem('domain_name', me.domain_name);
@@ -627,7 +638,7 @@ export default function UserChatPage() {
       const formData = new FormData();
       formData.append('file', file);
 
-      const res = await fetch(`${API_BASE}/api/documents/extract-fields`, {
+      const res = await fetch(`${API_BASE}/documents/extract-fields`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
         body: formData,

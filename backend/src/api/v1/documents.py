@@ -122,13 +122,20 @@ async def upload_document(
 async def list_documents(
     current_user: DomainAssignedUser,
     doc_status: Optional[str] = None,
+    domain_id: Optional[str] = None,
 ) -> List[DocumentResponse]:
-    """List documents for the current user's domain."""
+    """List documents for the current user's domain.
+
+    Admins may pass ?domain_id=<uuid> to list documents for any domain.
+    """
+    is_admin = current_user.role in ("root_admin", "domain_admin", "staff")
+    effective_domain_id = domain_id if (is_admin and domain_id) else current_user.domain_id
+
     admin = get_supabase_admin()
     query = admin.table("documents").select(
         "id, filename, file_size_bytes, mime_type, domain_id, document_type, "
         "status, ocr_processed, ocr_confidence_avg, created_at"
-    ).eq("domain_id", current_user.domain_id)
+    ).eq("domain_id", effective_domain_id)
     if doc_status:
         query = query.eq("status", doc_status)
     result = query.execute()

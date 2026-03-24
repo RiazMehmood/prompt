@@ -32,20 +32,26 @@ class TemplateResponse(BaseModel):
 async def list_templates(
     current_user: CurrentUser,
     include_inactive: bool = False,
+    domain_id: Optional[str] = None,
 ) -> List[TemplateResponse]:
     """List templates for the current user's domain.
 
+    Admins may pass ?domain_id=<uuid> to fetch templates for any domain.
     Filters to only active templates unless `include_inactive=true` is passed.
     Returns an empty list when the user has no domain assigned.
     """
-    if not current_user.domain_id:
+    # Admins can query any domain; regular users are locked to their own domain
+    is_admin = current_user.role in ("root_admin", "domain_admin", "staff")
+    effective_domain_id = domain_id if (is_admin and domain_id) else current_user.domain_id
+
+    if not effective_domain_id:
         return []
 
     admin = get_supabase_admin()
     query = admin.table("templates").select(
         "id, name, domain_id, description, content, slot_definitions, "
         "formatting_rules, version, is_active, created_at"
-    ).eq("domain_id", current_user.domain_id)
+    ).eq("domain_id", effective_domain_id)
 
     if not include_inactive:
         query = query.eq("is_active", True)

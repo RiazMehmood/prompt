@@ -33,7 +33,7 @@ export function roleHomePath(role: string): string {
     case 'domain_admin': return '/domain-admin';
     case 'institute_admin': return '/institute/dashboard';
     case 'staff':        return '/staff';
-    case 'user':         return '/user';
+    case 'user':         return '/user/chat';
     default:             return '/login';
   }
 }
