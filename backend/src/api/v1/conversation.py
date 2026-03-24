@@ -24,6 +24,10 @@ logger = structlog.get_logger(__name__)
 _lang_svc = LanguageDetectionService()
 _doc_agent = DocumentAgentService()
 
+# Per-session FIR context cache — stores structured FIR fields so document agent
+# can auto-fill slots when the user later requests a document in the same session
+_FIR_CONTEXT: dict[str, dict] = {}
+
 
 @router.post("/conversation", response_model=ConversationResponse)
 async def conversation(
@@ -64,8 +68,13 @@ async def conversation(
     # ── Load templates for the effective domain ────────────────────────────────
     templates = _get_templates(effective_domain_id)
 
+    # ── Cache FIR fields if provided (for this session) ───────────────────────
+    if body.fir_fields:
+        _FIR_CONTEXT[session_id] = body.fir_fields
+
     # ── Try document agent first ──────────────────────────────────────────────
     domain_name = current_user.domain_name or "General"
+    fir_context = _FIR_CONTEXT.get(session_id)
 
     agent_result = await _doc_agent.process(
         session_id=session_id,
@@ -75,6 +84,7 @@ async def conversation(
         professional_details=current_user.professional_details,
         user_id=current_user.id,
         domain_name=domain_name,
+        fir_context=fir_context,
     )
 
     if agent_result is not None:
@@ -184,14 +194,33 @@ async def _generate_reply(query: str, context: str, language: str, domain_name: 
         "sindhi": "سنڌيءَ ۾ جواب ڏيو. (Respond in Sindhi.)",
     }.get(language, "Respond in English.")
 
+    domain_persona = {
+        "Legal": (
+            "You are a senior Pakistani criminal defense lawyer with deep expertise in "
+            "Sindh courts, PPC (Pakistan Penal Code), Cr.P.C., and FIR law. "
+            "You speak like an experienced advocate — clear, precise, and strategic. "
+            "When FIR details are shared, analyse the sections, identify the legal issues, "
+            "and guide the lawyer on the best course of action. "
+            "If the user shares FIR fields and asks what to do, suggest the most relevant "
+            "legal documents (bail application, legal notice, etc.) based on the case."
+        ),
+        "Education": (
+            "You are an experienced educational consultant and curriculum expert. "
+            "Provide practical, evidence-based guidance for teachers, administrators, and students."
+        ),
+        "Medical": (
+            "You are a senior medical professional and clinical documentation expert. "
+            "Provide accurate, clinically sound guidance following standard medical practices."
+        ),
+    }.get(domain_name, f"You are a professional {domain_name} domain expert assistant.")
+
     prompt = (
-        f"You are a professional {domain_name} domain expert assistant. "
-        f"Only answer questions relevant to {domain_name}. "
-        f"Answer based on the provided context. "
-        f"If the answer cannot be found in the context, provide a helpful general answer "
-        f"within the {domain_name} domain, but note that it is not from the knowledge base.\n\n"
+        f"{domain_persona}\n\n"
+        f"Answer based on the provided context from the knowledge base. "
+        f"If context is insufficient, provide expert guidance from your professional knowledge, "
+        f"but indicate it is from general expertise rather than the knowledge base.\n\n"
         f"CONTEXT:\n{context}\n\n"
-        f"QUESTION: {query}\n\n"
+        f"QUESTION / USER MESSAGE: {query}\n\n"
         f"{lang_instruction}"
     )
 

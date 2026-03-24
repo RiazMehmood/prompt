@@ -36,6 +36,22 @@ interface KbDocument {
   created_at: string;
 }
 
+interface Case {
+  id: string;
+  case_title: string;
+  fir_number: string | null;
+  fir_date: string | null;
+  police_station: string | null;
+  accused_name: string | null;
+  sections: string | null;
+  status: string;
+  fir_fields: Record<string, string | null>;
+  fir_file_names: string[];
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const SESSIONS_KEY = 'chat_sessions_v2';
@@ -226,34 +242,57 @@ function SessionSidebar({
 
 // ── Right Sidebar — Templates + Knowledge Base ────────────────────────────────
 
+const DOC_TYPE_LABEL: Record<string, string> = {
+  act: 'Acts & Statutes',
+  case_law: 'Case Law',
+  sample: 'Sample Documents',
+  textbook: 'Textbooks',
+  protocol: 'Protocols',
+  standard: 'Standard Forms',
+};
+
 function RightSidebar({
   templates,
   kbDocs,
+  cases,
   domainName,
   onUseTemplate,
   onReferenceDoc,
+  onResumeCase,
   loadingData,
 }: {
   templates: Template[];
   kbDocs: KbDocument[];
+  cases: Case[];
   domainName: string | null;
   onUseTemplate: (name: string) => void;
   onReferenceDoc: (filename: string) => void;
+  onResumeCase: (c: Case) => void;
   loadingData: boolean;
 }) {
-  const [activeTab, setActiveTab] = useState<'templates' | 'knowledge'>('templates');
+  const [activeTab, setActiveTab] = useState<'templates' | 'knowledge' | 'cases'>('templates');
   const [search, setSearch] = useState('');
+  const [expandedCats, setExpandedCats] = useState<Set<string>>(new Set());
 
   const q = search.toLowerCase().trim();
   const filteredTemplates = q ? templates.filter(t => t.name.toLowerCase().includes(q) || t.description?.toLowerCase().includes(q)) : templates;
-  const filteredDocs      = q ? kbDocs.filter(d => d.filename.toLowerCase().includes(q) || d.document_type?.toLowerCase().includes(q)) : kbDocs;
+  const filteredDocs      = q ? kbDocs.filter(d => d.filename.toLowerCase().includes(q) || d.document_type?.toLowerCase().includes(q) || DOC_TYPE_LABEL[d.document_type]?.toLowerCase().includes(q)) : kbDocs;
 
-  const statusColor = (status: string) => {
-    if (status === 'approved') return 'bg-green-100 text-green-700';
-    if (status === 'pending')  return 'bg-yellow-100 text-yellow-700';
-    if (status === 'rejected') return 'bg-red-100 text-red-700';
-    return 'bg-gray-100 text-gray-500';
-  };
+  const docsByCategory = filteredDocs.reduce<Record<string, KbDocument[]>>((acc, doc) => {
+    const cat = doc.document_type ?? 'other';
+    if (!acc[cat]) acc[cat] = [];
+    acc[cat].push(doc);
+    return acc;
+  }, {});
+  const categories = Object.keys(docsByCategory).sort();
+
+  function toggleCat(cat: string) {
+    setExpandedCats(prev => {
+      const next = new Set(prev);
+      next.has(cat) ? next.delete(cat) : next.add(cat);
+      return next;
+    });
+  }
 
   return (
     <div className="flex flex-col h-full bg-white border-l border-gray-200 w-64 shrink-0">
@@ -288,19 +327,27 @@ function RightSidebar({
         <div className="flex rounded-lg bg-gray-100 p-0.5">
           <button
             onClick={() => setActiveTab('templates')}
-            className={`flex-1 py-1.5 text-xs font-medium rounded-md transition ${
+            className={`flex-1 py-1 text-xs font-medium rounded-md transition ${
               activeTab === 'templates' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'
             }`}
           >
-            Templates {q && filteredTemplates.length > 0 && <span className="ml-1 text-blue-500">{filteredTemplates.length}</span>}
+            Tmpl {q && filteredTemplates.length > 0 && <span className="ml-0.5 text-blue-500">{filteredTemplates.length}</span>}
           </button>
           <button
             onClick={() => setActiveTab('knowledge')}
-            className={`flex-1 py-1.5 text-xs font-medium rounded-md transition ${
+            className={`flex-1 py-1 text-xs font-medium rounded-md transition ${
               activeTab === 'knowledge' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'
             }`}
           >
-            KB {q && filteredDocs.length > 0 && <span className="ml-1 text-blue-500">{filteredDocs.length}</span>}
+            KB {kbDocs.length > 0 && !q ? `(${kbDocs.length})` : q && filteredDocs.length > 0 ? `(${filteredDocs.length})` : ''}
+          </button>
+          <button
+            onClick={() => setActiveTab('cases')}
+            className={`flex-1 py-1 text-xs font-medium rounded-md transition ${
+              activeTab === 'cases' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            Cases {cases.length > 0 && <span className="ml-0.5 text-amber-500">{cases.length}</span>}
           </button>
         </div>
       </div>
@@ -338,33 +385,88 @@ function RightSidebar({
               </button>
             ))}
           </div>
-        ) : (
+        ) : activeTab === 'knowledge' ? (
+          /* ── Knowledge Base — grouped by category ── */
           <div className="py-1">
-            {filteredDocs.length === 0 ? (
+            {categories.length === 0 ? (
               <div className="px-4 mt-6 text-center">
                 {q
                   ? <p className="text-xs text-gray-400">No documents matching "{search}"</p>
                   : <><p className="text-xs text-gray-400">No documents in knowledge base yet</p><p className="text-xs text-gray-300 mt-1">Admin uploads power AI auto-fill</p></>
                 }
               </div>
-            ) : filteredDocs.map(doc => (
-              <button
-                key={doc.id}
-                onClick={() => onReferenceDoc(doc.filename)}
-                className="w-full text-left px-3 py-2.5 hover:bg-blue-50 transition border-b border-gray-50 group"
-              >
-                <div className="flex items-start gap-2">
-                  <span className="text-sm mt-0.5 shrink-0">📎</span>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-xs font-medium text-gray-700 leading-tight break-all line-clamp-2 group-hover:text-blue-600 transition">{doc.filename}</p>
-                    <div className="flex items-center gap-1.5 mt-0.5">
-                      <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${statusColor(doc.status)}`}>{doc.status}</span>
-                      <span className="text-xs text-gray-300">{new Date(doc.created_at).toLocaleDateString()}</span>
+            ) : categories.map(cat => {
+              const docs = docsByCategory[cat];
+              const isOpen = expandedCats.has(cat) || !!q;
+              const label = DOC_TYPE_LABEL[cat] ?? cat.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+              return (
+                <div key={cat} className="border-b border-gray-100">
+                  <button
+                    onClick={() => toggleCat(cat)}
+                    className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-gray-50 transition text-left"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-sm">📁</span>
+                      <span className="text-xs font-semibold text-gray-700 leading-tight truncate">{label}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <span className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full font-medium">{docs.length}</span>
+                      <svg
+                        className={`w-3 h-3 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+                        fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </div>
+                  </button>
+                  {isOpen && (
+                    <div className="bg-gray-50 border-t border-gray-100">
+                      {docs.map(doc => (
+                        <button key={doc.id} onClick={() => onReferenceDoc(doc.filename)}
+                          className="w-full text-left px-3 py-2 hover:bg-blue-50 transition group border-b border-gray-100 last:border-0">
+                          <div className="flex items-start gap-2">
+                            <span className="text-xs mt-0.5 shrink-0 text-gray-400">📎</span>
+                            <p className="text-xs text-gray-600 leading-tight line-clamp-2 group-hover:text-blue-600 transition break-all">
+                              {doc.filename}
+                            </p>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          /* ── Cases tab ── */
+          <div className="py-1">
+            {cases.length === 0 ? (
+              <div className="px-4 mt-6 text-center">
+                <p className="text-xs text-gray-400">No cases yet</p>
+                <p className="text-xs text-gray-300 mt-1">Upload a FIR to create your first case</p>
+              </div>
+            ) : cases.map(c => {
+              const statusColor = c.status === 'active' ? 'bg-green-100 text-green-700' : c.status === 'closed' ? 'bg-gray-100 text-gray-500' : 'bg-yellow-100 text-yellow-700';
+              return (
+                <button
+                  key={c.id}
+                  onClick={() => onResumeCase(c)}
+                  className="w-full text-left px-3 py-2.5 hover:bg-amber-50 transition border-b border-gray-100 group"
+                >
+                  <div className="flex items-start gap-2">
+                    <span className="text-sm mt-0.5 shrink-0">⚖️</span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-semibold text-gray-800 leading-tight truncate group-hover:text-amber-700">{c.case_title}</p>
+                      {c.fir_number && <p className="text-xs text-gray-400 mt-0.5">FIR {c.fir_number}</p>}
+                      <div className="flex items-center justify-between mt-1">
+                        <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${statusColor}`}>{c.status}</span>
+                        <span className="text-xs text-gray-300">{new Date(c.created_at).toLocaleDateString()}</span>
+                      </div>
                     </div>
                   </div>
-                </div>
-              </button>
-            ))}
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
@@ -373,9 +475,179 @@ function RightSidebar({
       <div className="px-3 py-2.5 border-t border-gray-100">
         <p className="text-xs text-gray-300 text-center leading-tight">
           {activeTab === 'templates'
-            ? `${templates.length} templates · click to draft`
-            : `${kbDocs.length} docs in knowledge base`}
+            ? `${templates.length} template${templates.length !== 1 ? 's' : ''} · click to draft`
+            : activeTab === 'knowledge'
+            ? `${kbDocs.length} doc${kbDocs.length !== 1 ? 's' : ''} in ${categories.length} categor${categories.length !== 1 ? 'ies' : 'y'}`
+            : `${cases.length} case${cases.length !== 1 ? 's' : ''} · click to resume`}
         </p>
+      </div>
+    </div>
+  );
+}
+
+// ── FIR field metadata (mirrors backend FIR_FIELDS) ──────────────────────────
+
+const FIR_GROUPS = [
+  { key: 'fir',        label: '📋 FIR Details',   fields: ['fir_number','fir_date','fir_time','police_station','district','sections'] },
+  { key: 'accused',    label: '👤 Accused',        fields: ['accused_name','accused_father_name','accused_caste','accused_address'] },
+  { key: 'complainant',label: '🧑 Complainant',    fields: ['complainant_name','complainant_father_name','complainant_caste','complainant_address'] },
+  { key: 'incident',   label: '📍 Incident',       fields: ['incident_date','incident_time','incident_location','case_summary'] },
+  { key: 'officials',  label: '🔍 Officials',      fields: ['investigating_officer','sho_name','witnesses'] },
+];
+
+const FIR_FIELD_LABELS: Record<string, string> = {
+  fir_number: 'FIR Number', fir_date: 'FIR Date', fir_time: 'FIR Time',
+  police_station: 'Police Station', district: 'District', sections: 'Sections / Offences',
+  accused_name: 'Accused Name(s)', accused_father_name: "Accused Father's Name",
+  accused_caste: 'Accused Caste', accused_address: 'Accused Address',
+  complainant_name: 'Complainant Name', complainant_father_name: "Complainant Father's Name",
+  complainant_caste: 'Complainant Caste', complainant_address: 'Complainant Address',
+  incident_date: 'Incident Date', incident_time: 'Incident Time',
+  incident_location: 'Incident Location', case_summary: 'Case Narrative / Bayan',
+  investigating_officer: 'Investigating Officer', sho_name: 'SHO / Incharge', witnesses: 'Witnesses',
+};
+
+const FIR_CRITICAL = new Set(['fir_number','fir_date','police_station','sections','accused_name','incident_location']);
+
+const TEXTAREA_FIELDS = new Set(['accused_address','complainant_address','incident_location','case_summary','witnesses']);
+
+const SCAN_STEPS = [
+  'Uploading document…',
+  'Enhancing image quality…',
+  'Reading FIR (Pass 1) — Urdu/Sindhi OCR…',
+  'Verifying and refining fields (Pass 2)…',
+  'Almost done — finalising extraction…',
+];
+
+interface FIRResult {
+  fields: Record<string, string | null>;
+  filled_count: number;
+  total_fields: number;
+  critical_missing: string[];
+  confidence: number;
+  error?: string;
+}
+
+// ── FIR Review Panel ──────────────────────────────────────────────────────────
+
+function FIRReviewPanel({
+  result,
+  edited,
+  onEdit,
+  onApply,
+  onSaveCase,
+  onDiscard,
+  saving,
+}: {
+  result: FIRResult;
+  edited: Record<string, string>;
+  onEdit: (key: string, val: string) => void;
+  onApply: () => void;
+  onSaveCase: () => void;
+  onDiscard: () => void;
+  saving: boolean;
+}) {
+  const pct = Math.round(result.confidence * 100);
+  const barColor = pct >= 70 ? 'bg-green-500' : pct >= 40 ? 'bg-yellow-500' : 'bg-red-500';
+
+  return (
+    <div className="flex flex-col h-full bg-white overflow-hidden">
+      {/* Header */}
+      <div className="px-6 py-4 border-b border-gray-200 bg-white shrink-0">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <h2 className="text-sm font-bold text-gray-900">📋 FIR Extraction Review</h2>
+            <p className="text-xs text-gray-500 mt-0.5">
+              {result.filled_count}/{result.total_fields} fields extracted · Edit any field before applying
+            </p>
+          </div>
+          <button onClick={onDiscard} className="text-xs text-gray-400 hover:text-gray-600 px-2 py-1 rounded hover:bg-gray-100 transition">
+            ✕ Discard
+          </button>
+        </div>
+        {/* Confidence bar */}
+        <div className="flex items-center gap-2">
+          <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+            <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${pct}%` }} />
+          </div>
+          <span className={`text-xs font-semibold ${pct >= 70 ? 'text-green-600' : pct >= 40 ? 'text-yellow-600' : 'text-red-600'}`}>
+            {pct}% confidence
+          </span>
+        </div>
+        {result.critical_missing.length > 0 && (
+          <p className="text-xs text-amber-600 mt-2 bg-amber-50 px-2 py-1 rounded">
+            ⚠ Missing critical fields: {result.critical_missing.map(k => FIR_FIELD_LABELS[k] ?? k).join(', ')} — please fill these manually
+          </p>
+        )}
+      </div>
+
+      {/* Fields — scrollable */}
+      <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6">
+        {FIR_GROUPS.map(grp => (
+          <div key={grp.key}>
+            <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">{grp.label}</p>
+            <div className="grid grid-cols-2 gap-3">
+              {grp.fields.map(fk => {
+                const isCritical = FIR_CRITICAL.has(fk);
+                const isTextarea = TEXTAREA_FIELDS.has(fk);
+                const val = edited[fk] ?? result.fields[fk] ?? '';
+                const missing = isCritical && !val;
+                return (
+                  <div key={fk} className={`${isTextarea ? 'col-span-2' : ''}`}>
+                    <label className="block text-xs text-gray-500 mb-1">
+                      {FIR_FIELD_LABELS[fk]}
+                      {isCritical && <span className="text-red-400 ml-1">*</span>}
+                    </label>
+                    {isTextarea ? (
+                      <textarea
+                        rows={fk === 'case_summary' ? 4 : 2}
+                        value={val}
+                        onChange={e => onEdit(fk, e.target.value)}
+                        placeholder={missing ? '⚠ Not extracted — enter manually' : ''}
+                        className={`w-full px-3 py-2 text-xs rounded-lg border text-gray-800 resize-none focus:outline-none focus:border-blue-400 transition
+                          ${missing ? 'border-amber-300 bg-amber-50' : val ? 'border-gray-200 bg-white' : 'border-gray-200 bg-gray-50'}`}
+                      />
+                    ) : (
+                      <input
+                        type="text"
+                        value={val}
+                        onChange={e => onEdit(fk, e.target.value)}
+                        placeholder={missing ? '⚠ Not found — enter manually' : ''}
+                        className={`w-full px-3 py-2 text-xs rounded-lg border text-gray-800 focus:outline-none focus:border-blue-400 transition
+                          ${missing ? 'border-amber-300 bg-amber-50' : val ? 'border-gray-200 bg-white' : 'border-gray-200 bg-gray-50'}`}
+                      />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Footer actions */}
+      <div className="px-6 py-4 border-t border-gray-200 bg-gray-50 shrink-0 space-y-2">
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onApply}
+            className="flex-1 py-2.5 bg-gray-900 text-white text-sm font-semibold rounded-xl hover:bg-gray-700 transition"
+          >
+            💬 Use in Chat
+          </button>
+          <button
+            onClick={onSaveCase}
+            disabled={saving}
+            className="flex-1 py-2.5 bg-amber-600 text-white text-sm font-semibold rounded-xl hover:bg-amber-700 disabled:opacity-50 transition"
+          >
+            {saving ? 'Saving…' : '📁 Save as Case'}
+          </button>
+        </div>
+        <button
+          onClick={onDiscard}
+          className="w-full py-2 text-xs text-gray-400 hover:text-gray-600 transition"
+        >
+          Discard
+        </button>
       </div>
     </div>
   );
@@ -456,8 +728,19 @@ export default function UserChatPage() {
     return localStorage.getItem('domain_name');
   });
 
+  // Cases state
+  const [cases, setCases]               = useState<Case[]>([]);
+  const [savingCase, setSavingCase]     = useState(false);
+
+  // FIR extraction state
+  const [firStep, setFirStep]             = useState<'idle' | 'scanning' | 'reviewing'>('idle');
+  const [firScanMsg, setFirScanMsg]       = useState('');
+  const [firResult, setFirResult]         = useState<FIRResult | null>(null);
+  const [firEdited, setFirEdited]         = useState<Record<string, string>>({});
+
   const bottomRef    = useRef<HTMLDivElement>(null);
   const fileRef      = useRef<HTMLInputElement>(null);
+  const firFileRef   = useRef<HTMLInputElement>(null);
   const textareaRef  = useRef<HTMLTextAreaElement>(null);
   const initialised  = useRef(false);
 
@@ -475,18 +758,20 @@ export default function UserChatPage() {
 
     const headers = { Authorization: `Bearer ${token}` };
 
-    // Fetch domain name, templates, and KB docs in parallel
+    // Fetch domain name, templates, KB docs, and cases in parallel
     Promise.all([
       fetch(`${API_BASE}/auth/me`, { headers }).then(r => r.ok ? r.json() : null),
       fetch(`${API_BASE}/templates`, { headers }).then(r => r.ok ? r.json() : []),
       fetch(`${API_BASE}/documents?doc_status=approved`, { headers }).then(r => r.ok ? r.json() : []),
-    ]).then(([me, tmpl, docs]) => {
+      fetch(`${API_BASE}/api/cases`, { headers }).then(r => r.ok ? r.json() : []),
+    ]).then(([me, tmpl, docs, casesData]) => {
       if (me?.domain_name) {
         localStorage.setItem('domain_name', me.domain_name);
         setDomainName(me.domain_name);
       }
       setTemplates(Array.isArray(tmpl) ? tmpl : []);
       setKbDocs(Array.isArray(docs) ? docs : []);
+      setCases(Array.isArray(casesData) ? casesData : []);
     }).catch(() => {}).finally(() => setLoadingData(false));
   }, []);
 
@@ -558,9 +843,198 @@ export default function UserChatPage() {
     textareaRef.current?.focus();
   }
 
+  // ── FIR extraction ────────────────────────────────────────────────────────
+
+  async function handleFIRUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    if (!files.length) return;
+    e.target.value = '';
+
+    setFirStep('scanning');
+    setFirResult(null);
+    setFirEdited({});
+
+    // Cycle through progress messages while waiting
+    let stepIdx = 0;
+    setFirScanMsg(files.length > 1 ? `Loading ${files.length} pages…` : SCAN_STEPS[0]);
+    const interval = setInterval(() => {
+      stepIdx = Math.min(stepIdx + 1, SCAN_STEPS.length - 1);
+      setFirScanMsg(SCAN_STEPS[stepIdx]);
+    }, 3500);
+
+    try {
+      const token = localStorage.getItem('auth_token') || localStorage.getItem('admin_token');
+      const form = new FormData();
+      // FastAPI List[UploadFile] expects the same field name repeated
+      files.slice(0, 6).forEach(f => form.append('files', f));
+      const res = await fetch(`${API_BASE}/api/fir/extract`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: form,
+      });
+      const data: FIRResult = await res.json();
+      if (!res.ok) throw new Error((data as any)?.detail ?? 'Extraction failed');
+      setFirResult(data);
+      setFirStep('reviewing');
+    } catch (err: any) {
+      setFirStep('idle');
+      setActive(prev => ({
+        ...prev,
+        messages: [...prev.messages, {
+          role: 'assistant',
+          content: `⚠️ FIR scan failed: ${err?.message ?? 'Please try again or type the details manually.'}`,
+        }],
+        updatedAt: new Date().toISOString(),
+      }));
+    } finally {
+      clearInterval(interval);
+    }
+  }
+
+  function handleFIREdit(key: string, val: string) {
+    setFirEdited(prev => ({ ...prev, [key]: val }));
+  }
+
+  function applyFIRToChat() {
+    if (!firResult) return;
+    const f = (key: string) => firEdited[key] ?? firResult.fields[key] ?? '';
+
+    const lines: string[] = [
+      '📋 FIR details extracted and verified:\n',
+      `FIR No: ${f('fir_number')}    Date: ${f('fir_date')}    Time: ${f('fir_time')}`,
+      `Police Station: ${f('police_station')}    District: ${f('district')}`,
+      `Sections / Offences: ${f('sections')}`,
+      '',
+      `Accused: ${f('accused_name')}${f('accused_father_name') ? ` s/o ${f('accused_father_name')}` : ''}${f('accused_caste') ? `, b/c ${f('accused_caste')}` : ''}${f('accused_address') ? `, r/o ${f('accused_address')}` : ''}`,
+      '',
+      `Complainant: ${f('complainant_name')}${f('complainant_father_name') ? ` s/o ${f('complainant_father_name')}` : ''}${f('complainant_address') ? `, r/o ${f('complainant_address')}` : ''}`,
+      '',
+      `Incident: ${f('incident_date')}${f('incident_time') ? ` at ${f('incident_time')}` : ''}, Location: ${f('incident_location')}`,
+      f('case_summary') ? `\nCase Narrative: ${f('case_summary')}` : '',
+      f('witnesses') ? `\nWitnesses: ${f('witnesses')}` : '',
+      f('investigating_officer') ? `IO: ${f('investigating_officer')}` : '',
+      '',
+      'What legal document would you like me to prepare based on this FIR? For example: Bail Application, Legal Notice, Vakalatnama, Succession Certificate, etc.',
+    ].filter(l => l !== undefined);
+
+    const msg = lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+
+    // Build merged FIR fields (edited values take priority)
+    const mergedFields: Record<string, string | null> = { ...firResult.fields };
+    for (const [k, v] of Object.entries(firEdited)) { if (v) mergedFields[k] = v; }
+
+    setFirStep('idle');
+    setFirResult(null);
+    setFirEdited({});
+    send(msg, mergedFields);
+  }
+
+  function discardFIR() {
+    setFirStep('idle');
+    setFirResult(null);
+    setFirEdited({});
+  }
+
+  async function saveCase() {
+    if (!firResult) return;
+    setSavingCase(true);
+    try {
+      const merged: Record<string, string | null> = { ...firResult.fields };
+      for (const [k, v] of Object.entries(firEdited)) {
+        if (v) merged[k] = v;
+      }
+      const token = localStorage.getItem('auth_token') || localStorage.getItem('admin_token');
+      const res = await fetch(`${API_BASE}/api/cases`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ fir_fields: merged, fir_file_names: [] }),
+      });
+      if (!res.ok) throw new Error('Failed to save case');
+      const saved: Case = await res.json();
+      setCases(prev => [saved, ...prev]);
+      setFirStep('idle');
+      setFirResult(null);
+      setFirEdited({});
+      // notify in chat
+      setActive(prev => ({
+        ...prev,
+        messages: [...prev.messages, {
+          role: 'assistant',
+          content: `✅ Case saved: **${saved.case_title}**\nFIR ${saved.fir_number ?? '—'} · ${saved.police_station ?? ''}\n\nYou can find this case in the Cases tab (right panel). Use "💬 Use in Chat" next time to draft documents.`,
+        }],
+        updatedAt: new Date().toISOString(),
+      }));
+    } catch {
+      setActive(prev => ({
+        ...prev,
+        messages: [...prev.messages, { role: 'assistant', content: '⚠️ Could not save case — please try again.' }],
+        updatedAt: new Date().toISOString(),
+      }));
+    } finally {
+      setSavingCase(false);
+    }
+  }
+
+  function resumeCase(c: Case) {
+    const f = (k: string) => c.fir_fields?.[k] ?? '';
+    const lines = [
+      `📁 Resuming case: **${c.case_title}**\n`,
+      `FIR No: ${f('fir_number')}    Date: ${f('fir_date')}`,
+      `Police Station: ${f('police_station')}    District: ${f('district')}`,
+      `Sections: ${f('sections')}`,
+      '',
+      `Accused: ${f('accused_name')}${f('accused_father_name') ? ` s/o ${f('accused_father_name')}` : ''}`,
+      `Complainant: ${f('complainant_name')}`,
+      f('incident_location') ? `Incident Location: ${f('incident_location')}` : '',
+      f('case_summary') ? `\nNarrative: ${f('case_summary')}` : '',
+      '',
+      'What would you like to do with this case? I can draft a Bail Application, Legal Notice, Vakalatnama, or any other legal document.',
+    ].filter(Boolean);
+
+    const msg = lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+
+    // Start a new session, then immediately send the resume message in it
+    if (active.messages.length > 0) {
+      setSessions(prev => {
+        const without = prev.filter(s => s.id !== active.id);
+        return [active, ...without];
+      });
+    }
+    const newSess = newSession();
+    setActive(newSess);
+    setInput('');
+
+    // Send resume message — use a ref trick to get the right session ID
+    setTimeout(() => {
+      const userMsg: Message = { role: 'user', content: msg };
+      const updated: ChatSession = {
+        ...newSess,
+        messages: [userMsg],
+        title: sessionTitle([userMsg]),
+        updatedAt: new Date().toISOString(),
+      };
+      setActive(updated);
+      setLoading(true);
+      const token = localStorage.getItem('auth_token') || localStorage.getItem('admin_token');
+      fetch(`${API_BASE}/api/conversation`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ message: msg, session_id: newSess.backendSessionId, fir_fields: c.fir_fields }),
+      }).then(r => r.json()).then(res => {
+        const assistantMsg: Message = {
+          role: 'assistant', content: res.reply,
+          documentReady: res.document_ready, documentContent: res.document_content, documentId: res.document_id,
+        };
+        setActive(prev => ({ ...prev, messages: [...prev.messages, assistantMsg], updatedAt: new Date().toISOString() }));
+      }).catch(() => {
+        setActive(prev => ({ ...prev, messages: [...prev.messages, { role: 'assistant', content: 'Sorry, something went wrong. Please try again.' }] }));
+      }).finally(() => setLoading(false));
+    }, 10);
+  }
+
   // ── Send message ──────────────────────────────────────────────────────────
 
-  async function send(overrideText?: string) {
+  async function send(overrideText?: string, firFields?: Record<string, string | null>) {
     const text = (overrideText ?? input).trim();
     if (!text || loading) return;
     setInput('');
@@ -576,6 +1050,9 @@ export default function UserChatPage() {
     setLoading(true);
 
     try {
+      const payload: Record<string, unknown> = { message: text, session_id: updatedSession.backendSessionId };
+      if (firFields) payload.fir_fields = firFields;
+
       const res = await apiFetch<{
         reply: string;
         document_ready: boolean;
@@ -584,7 +1061,7 @@ export default function UserChatPage() {
       }>('/api/conversation', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text, session_id: updatedSession.backendSessionId }),
+        body: JSON.stringify(payload),
       });
 
       const assistantMsg: Message = {
@@ -701,6 +1178,16 @@ export default function UserChatPage() {
         </div>
       </div>
 
+      {/* Hidden FIR file input — multiple files supported */}
+      <input
+        ref={firFileRef}
+        type="file"
+        accept=".pdf,.jpg,.jpeg,.png,.tiff,.webp"
+        multiple
+        className="hidden"
+        onChange={handleFIRUpload}
+      />
+
       {/* CENTRE: Main chat area */}
       <div className="flex-1 flex flex-col bg-gray-50 min-w-0 overflow-hidden">
 
@@ -732,15 +1219,68 @@ export default function UserChatPage() {
           </button>
         </div>
 
-        {/* Messages */}
+        {/* FIR scanning overlay — replaces empty state */}
+        {firStep === 'reviewing' && firResult ? (
+          <FIRReviewPanel
+            result={firResult}
+            edited={firEdited}
+            onEdit={handleFIREdit}
+            onApply={applyFIRToChat}
+            onSaveCase={saveCase}
+            onDiscard={discardFIR}
+            saving={savingCase}
+          />
+        ) : firStep === 'scanning' ? (
+          <div className="flex-1 flex flex-col items-center justify-center gap-4 text-gray-500">
+            <div className="w-14 h-14 rounded-2xl bg-gray-900 flex items-center justify-center">
+              <span className="text-2xl">📋</span>
+            </div>
+            <div className="text-center">
+              <p className="text-sm font-semibold text-gray-800 mb-1">Scanning FIR Document</p>
+              <p className="text-xs text-gray-500">{firScanMsg}</p>
+            </div>
+            <div className="flex gap-1.5">
+              {[0,1,2].map(i => (
+                <span key={i} className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
+                  style={{ animationDelay: `${i * 150}ms` }} />
+              ))}
+            </div>
+            <p className="text-xs text-gray-400 max-w-xs text-center">
+              Using multi-pass AI to read Urdu/Sindhi text — this may take 15–25 seconds
+            </p>
+          </div>
+        ) : (
+
+        /* Messages */
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
           {active.messages.length === 0 && (
-            <div className="text-center py-20 text-gray-400">
+            <div className="text-center py-12 text-gray-400">
               <div className="text-5xl mb-4">{domainUI.icon}</div>
               <p className="text-sm font-medium text-gray-600">How can I help you today?</p>
               {domainName && (
                 <p className="text-xs text-gray-400 mt-1">{domainName} domain</p>
               )}
+
+              {/* FIR Upload card — prominent for Legal domain */}
+              {domainName === 'Legal' && (
+                <div className="mt-6 mx-auto max-w-sm">
+                  <button
+                    onClick={() => firFileRef.current?.click()}
+                    className="w-full flex items-center gap-3 px-5 py-4 bg-gray-900 text-white rounded-2xl hover:bg-gray-800 transition shadow-lg group"
+                  >
+                    <span className="text-2xl">📋</span>
+                    <div className="text-left">
+                      <p className="text-sm font-bold">Upload FIR Document</p>
+                      <p className="text-xs text-gray-300">AI extracts all case details automatically</p>
+                    </div>
+                    <svg className="w-4 h-4 ml-auto text-gray-400 group-hover:text-white transition" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                    </svg>
+                  </button>
+                  <p className="text-xs text-gray-400 mt-2">Select 1–6 files (pages) · PDF, JPEG, PNG · Urdu/Sindhi photocopies supported</p>
+                </div>
+              )}
+
               <div className="mt-5 space-y-2 text-xs text-gray-400">
                 {domainUI.suggestions.map((s, i) => <p key={i}>{s}</p>)}
               </div>
@@ -793,8 +1333,9 @@ export default function UserChatPage() {
           )}
           <div ref={bottomRef} />
         </div>
+        )} {/* end firStep conditional */}
 
-        {/* Input bar */}
+        {/* Input bar — always visible */}
         <div className="px-6 pb-5 pt-3 bg-white border-t border-gray-200 shrink-0">
           <div className="flex gap-2 items-end max-w-3xl mx-auto">
             <input
@@ -804,6 +1345,19 @@ export default function UserChatPage() {
               className="hidden"
               onChange={handleFileUpload}
             />
+
+            {/* FIR scan button — Legal domain only */}
+            {domainName === 'Legal' && (
+              <button
+                onClick={() => firFileRef.current?.click()}
+                disabled={loading || uploading || firStep === 'scanning'}
+                title="Upload FIR — AI extracts all case details"
+                className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl border border-gray-900 bg-gray-900 text-white text-xs font-semibold hover:bg-gray-700 disabled:opacity-40 transition shrink-0"
+              >
+                📋 FIR
+              </button>
+            )}
+
             <button
               onClick={() => fileRef.current?.click()}
               disabled={loading || uploading}
@@ -821,29 +1375,36 @@ export default function UserChatPage() {
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={handleKey}
-              placeholder={domainUI.placeholder}
-              className="flex-1 resize-none px-4 py-3 rounded-2xl border border-gray-200 text-sm focus:outline-none focus:border-gray-400 transition bg-white"
+              placeholder={firStep === 'reviewing' ? 'Review extracted FIR details above, then click Apply…' : domainUI.placeholder}
+              disabled={firStep === 'scanning'}
+              className="flex-1 resize-none px-4 py-3 rounded-2xl border border-gray-200 text-sm focus:outline-none focus:border-gray-400 transition bg-white disabled:opacity-50"
               style={{ maxHeight: '120px', overflowY: 'auto' }}
             />
             <button
               onClick={() => send()}
-              disabled={!input.trim() || loading || uploading}
+              disabled={!input.trim() || loading || uploading || firStep === 'scanning'}
               className="px-5 py-3 bg-gray-900 text-white rounded-2xl text-sm font-medium hover:bg-gray-700 disabled:opacity-40 transition shrink-0"
             >
               Send
             </button>
           </div>
-          <p className="text-center text-xs text-gray-300 mt-2">{domainUI.uploadHint}</p>
+          {domainName === 'Legal' && firStep === 'idle' && (
+            <p className="text-center text-xs text-gray-400 mt-2">
+              📋 <button onClick={() => firFileRef.current?.click()} className="underline hover:text-gray-600 transition">Upload FIR</button> to auto-extract all case details · or type your question
+            </p>
+          )}
         </div>
       </div>
 
-      {/* RIGHT: Templates + Knowledge Base sidebar */}
+      {/* RIGHT: Templates + Knowledge Base + Cases sidebar */}
       <RightSidebar
         templates={templates}
         kbDocs={kbDocs}
+        cases={cases}
         domainName={domainName}
         onUseTemplate={handleUseTemplate}
         onReferenceDoc={handleReferenceDoc}
+        onResumeCase={resumeCase}
         loadingData={loadingData}
       />
     </div>

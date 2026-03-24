@@ -87,6 +87,15 @@ function DocumentCard({ content, docId }: { content: string; docId?: string }) {
 
 // ── Right Sidebar ─────────────────────────────────────────────────────────────
 
+const DOC_TYPE_LABEL: Record<string, string> = {
+  act: 'Acts & Statutes',
+  case_law: 'Case Law',
+  sample: 'Sample Documents',
+  textbook: 'Textbooks',
+  protocol: 'Protocols',
+  standard: 'Standard Forms',
+};
+
 function RightSidebar({
   templates, kbDocs, domainName, loadingData, onUseTemplate, onReferenceDoc,
 }: {
@@ -98,11 +107,38 @@ function RightSidebar({
   onReferenceDoc: (filename: string) => void;
 }) {
   const [activeTab, setActiveTab] = useState<'templates' | 'knowledge'>('templates');
+  const [search, setSearch] = useState('');
+  const [expandedCats, setExpandedCats] = useState<Set<string>>(new Set());
 
-  const statusColor = (s: string) =>
-    s === 'approved' ? 'bg-green-100 text-green-700' :
-    s === 'pending'  ? 'bg-yellow-100 text-yellow-700' :
-    s === 'rejected' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-500';
+  // Reset expanded state when domain changes (kbDocs array reference changes)
+  const prevDocsLen = kbDocs.length;
+
+  const q = search.toLowerCase().trim();
+
+  const filteredTemplates = q
+    ? templates.filter(t => t.name.toLowerCase().includes(q) || t.description?.toLowerCase().includes(q))
+    : templates;
+
+  // Group KB docs by document_type, optionally filtered by search
+  const filteredDocs = q
+    ? kbDocs.filter(d => d.filename.toLowerCase().includes(q) || d.document_type?.toLowerCase().includes(q) || DOC_TYPE_LABEL[d.document_type]?.toLowerCase().includes(q))
+    : kbDocs;
+
+  const docsByCategory = filteredDocs.reduce<Record<string, KbDoc[]>>((acc, doc) => {
+    const cat = doc.document_type ?? 'other';
+    if (!acc[cat]) acc[cat] = [];
+    acc[cat].push(doc);
+    return acc;
+  }, {});
+  const categories = Object.keys(docsByCategory).sort();
+
+  function toggleCat(cat: string) {
+    setExpandedCats(prev => {
+      const next = new Set(prev);
+      next.has(cat) ? next.delete(cat) : next.add(cat);
+      return next;
+    });
+  }
 
   return (
     <div className="flex flex-col h-full bg-white border-l border-gray-200 w-64 shrink-0">
@@ -111,14 +147,32 @@ function RightSidebar({
         <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
           {domainName ? `${domainName} Resources` : 'Resources'}
         </p>
+
+        {/* Search */}
+        <div className="relative mb-2">
+          <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+            <circle cx="11" cy="11" r="8" /><path strokeLinecap="round" d="M21 21l-4.35-4.35" />
+          </svg>
+          <input
+            type="text"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search…"
+            className="w-full pl-7 pr-6 py-1.5 text-xs rounded-lg border border-gray-200 bg-gray-50 focus:outline-none focus:border-gray-400 focus:bg-white transition"
+          />
+          {search && (
+            <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-300 hover:text-gray-500 text-xs leading-none">×</button>
+          )}
+        </div>
+
         <div className="flex rounded-lg bg-gray-100 p-0.5">
           <button onClick={() => setActiveTab('templates')}
             className={`flex-1 py-1.5 text-xs font-medium rounded-md transition ${activeTab === 'templates' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
-            Templates
+            Templates {q && filteredTemplates.length > 0 ? `(${filteredTemplates.length})` : ''}
           </button>
           <button onClick={() => setActiveTab('knowledge')}
             className={`flex-1 py-1.5 text-xs font-medium rounded-md transition ${activeTab === 'knowledge' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
-            Knowledge Base
+            KB {q && filteredDocs.length > 0 ? `(${filteredDocs.length})` : kbDocs.length > 0 ? `(${kbDocs.length})` : ''}
           </button>
         </div>
       </div>
@@ -135,9 +189,9 @@ function RightSidebar({
           </div>
         ) : activeTab === 'templates' ? (
           <div className="py-2">
-            {templates.length === 0
-              ? <p className="text-xs text-gray-400 text-center mt-6 px-4">No templates for this domain</p>
-              : templates.map(t => (
+            {filteredTemplates.length === 0
+              ? <p className="text-xs text-gray-400 text-center mt-6 px-4">{q ? 'No templates match your search' : 'No templates for this domain'}</p>
+              : filteredTemplates.map(t => (
                 <button key={t.id} onClick={() => onUseTemplate(t.name)}
                   className="w-full text-left px-4 py-3 hover:bg-gray-50 transition border-b border-gray-50 group">
                   <div className="flex items-start gap-2">
@@ -154,30 +208,57 @@ function RightSidebar({
             }
           </div>
         ) : (
-          <div className="py-2">
-            {kbDocs.length === 0
-              ? (
-                <div className="px-4 mt-6 text-center">
-                  <p className="text-xs text-gray-400">No documents in knowledge base</p>
-                  <p className="text-xs text-gray-300 mt-1">Upload and approve documents via the Documents section</p>
-                </div>
-              )
-              : kbDocs.map(doc => (
-                <button key={doc.id} onClick={() => onReferenceDoc(doc.filename)}
-                  className="w-full text-left px-4 py-3 hover:bg-gray-50 transition border-b border-gray-50 group">
-                  <div className="flex items-start gap-2">
-                    <span className="text-base mt-0.5 shrink-0">📎</span>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-xs font-medium text-gray-700 leading-tight break-all line-clamp-2">{doc.filename}</p>
-                      <div className="flex items-center gap-1.5 mt-1">
-                        <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${statusColor(doc.status)}`}>{doc.status}</span>
-                        <span className="text-xs text-gray-300">{new Date(doc.created_at).toLocaleDateString()}</span>
-                      </div>
+          /* ── Knowledge Base — grouped by category ── */
+          <div className="py-1">
+            {categories.length === 0 ? (
+              <div className="px-4 mt-6 text-center">
+                <p className="text-xs text-gray-400">{q ? 'No documents match your search' : 'No documents in knowledge base'}</p>
+                {!q && <p className="text-xs text-gray-300 mt-1">Upload and approve documents via the Documents section</p>}
+              </div>
+            ) : categories.map(cat => {
+              const docs = docsByCategory[cat];
+              const isOpen = expandedCats.has(cat) || !!q; // auto-expand when searching
+              const label = DOC_TYPE_LABEL[cat] ?? cat.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+              return (
+                <div key={cat} className="border-b border-gray-100">
+                  {/* Category header */}
+                  <button
+                    onClick={() => toggleCat(cat)}
+                    className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-gray-50 transition text-left"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-sm">📁</span>
+                      <span className="text-xs font-semibold text-gray-700 leading-tight truncate">{label}</span>
                     </div>
-                  </div>
-                </button>
-              ))
-            }
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <span className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full font-medium">{docs.length}</span>
+                      <svg
+                        className={`w-3 h-3 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+                        fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </div>
+                  </button>
+
+                  {/* Documents list */}
+                  {isOpen && (
+                    <div className="bg-gray-50 border-t border-gray-100">
+                      {docs.map(doc => (
+                        <button key={doc.id} onClick={() => onReferenceDoc(doc.filename)}
+                          className="w-full text-left px-4 py-2 hover:bg-gray-100 transition group border-b border-gray-100 last:border-0">
+                          <div className="flex items-start gap-2">
+                            <span className="text-xs mt-0.5 shrink-0 text-gray-400">📎</span>
+                            <p className="text-xs text-gray-600 leading-tight line-clamp-2 group-hover:text-blue-600 transition break-all">
+                              {doc.filename}
+                            </p>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
@@ -185,7 +266,9 @@ function RightSidebar({
       {/* Footer */}
       <div className="px-4 py-3 border-t border-gray-100">
         <p className="text-xs text-gray-300 text-center leading-tight">
-          {activeTab === 'templates' ? 'Click a template to test it in chat' : 'KB docs used for RAG auto-fill'}
+          {activeTab === 'templates'
+            ? `${templates.length} template${templates.length !== 1 ? 's' : ''} · click to test`
+            : `${kbDocs.length} doc${kbDocs.length !== 1 ? 's' : ''} in ${categories.length} categor${categories.length !== 1 ? 'ies' : 'y'}`}
         </p>
       </div>
     </div>

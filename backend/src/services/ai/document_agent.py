@@ -45,6 +45,26 @@ RAG_SLOTS = {"bail_grounds"}
 # Slots AI fills automatically without asking user
 AUTO_SLOTS = {"application_date"}
 
+# FIR field → template slot name mapping
+# These slots are auto-filled from FIR extraction data when available
+FIR_SLOT_MAP: dict[str, str] = {
+    "fir_number":          "fir_number",
+    "fir_date":            "fir_date",
+    "police_station":      "police_station",
+    "district":            "district",
+    "sections":            "sections",
+    "accused_name":        "accused_name",
+    "accused_father_name": "accused_father_name",
+    "accused_address":     "accused_address",
+    "accused_caste":       "accused_caste",
+    "complainant_name":    "complainant_name",
+    "incident_date":       "incident_date",
+    "incident_location":   "incident_location",
+    "case_summary":        "case_summary",
+    "investigating_officer": "investigating_officer",
+    "witnesses":           "witnesses",
+}
+
 # Map from slot name → professional_details key
 # Slots in this map are auto-filled from the lawyer's profile (no need to ask)
 PROFILE_SLOT_MAP: dict[str, str] = {
@@ -75,6 +95,7 @@ class DocumentAgentService:
         professional_details: dict | None = None,
         user_id: str | None = None,
         domain_name: str = "General",
+        fir_context: dict | None = None,
     ) -> Optional[dict]:
         """
         Main entry point from the conversation router.
@@ -89,7 +110,7 @@ class DocumentAgentService:
             template = await self._detect_intent(message, templates, domain_name)
             if not template:
                 return None  # Normal chat message
-            state = self._init_state(session_id, template, domain_namespace, professional_details or {}, user_id, domain_name)
+            state = self._init_state(session_id, template, domain_namespace, professional_details or {}, user_id, domain_name, fir_context)
             return {"reply": self._build_info_request(state), "document_ready": False}
 
         mode = state.get("mode")
@@ -144,6 +165,7 @@ class DocumentAgentService:
         professional_details: dict,
         user_id: str | None = None,
         domain_name: str = "General",
+        fir_context: dict | None = None,
     ) -> dict:
         slots = template.get("slot_definitions", [])
 
@@ -154,7 +176,20 @@ class DocumentAgentService:
             if prof_key and professional_details.get(prof_key):
                 pre_filled[s["name"]] = professional_details[prof_key]
 
-        # Only ask for user_input slots that are not pre-filled from profile
+        # Pre-fill FIR-derived slots (fields extracted from uploaded FIR document)
+        fir_filled: dict[str, str] = {}
+        if fir_context:
+            for fir_key, slot_key in FIR_SLOT_MAP.items():
+                val = fir_context.get(fir_key)
+                if val and str(val).strip():
+                    # Check if template has this slot
+                    for s in slots:
+                        if s["name"] == slot_key:
+                            fir_filled[slot_key] = str(val).strip()
+                            break
+        pre_filled.update(fir_filled)
+
+        # Only ask for user_input slots that are not pre-filled from profile or FIR
         user_slots = [
             s for s in slots
             if s.get("data_source") == "user_input"
@@ -173,7 +208,8 @@ class DocumentAgentService:
             "user_slots": user_slots,
             "rag_slot_names": rag_slot_names,
             "collected": pre_filled,
-            "profile_filled": list(pre_filled.keys()),
+            "profile_filled": list(set(pre_filled.keys()) - set(fir_filled.keys())),
+            "fir_filled": list(fir_filled.keys()),
             "user_id": user_id,
         }
         _SESSIONS[session_id] = state
@@ -190,6 +226,13 @@ class DocumentAgentService:
             label = _to_label(s["name"])
             req = "" if s.get("required", True) else " *(optional)*"
             lines.append(f"• **{label}**{req}")
+
+        # Mention what was auto-filled from FIR
+        fir_filled = state.get("fir_filled", [])
+        fir_note = ""
+        if fir_filled:
+            fir_labels = ", ".join(_to_label(n) for n in fir_filled)
+            fir_note = f"\n\n📋 Auto-filled from FIR: {fir_labels}"
 
         # Mention what was auto-filled from profile
         profile_note = ""
@@ -210,6 +253,7 @@ class DocumentAgentService:
             # All fields are auto-filled — proceed directly
             return (
                 f"I'll draft a **{template_name}** for you."
+                + fir_note
                 + profile_note
                 + (rag_note or "")
                 + "\n\nShall I go ahead and generate it now?"
@@ -217,9 +261,9 @@ class DocumentAgentService:
 
         return (
             f"I'll draft a **{template_name}** for you. "
-            f"Please provide the following information in your own words — "
-            f"you can write it all in one message:\n\n"
+            f"Please provide the following additional information:\n\n"
             + "\n".join(lines)
+            + fir_note
             + profile_note
             + rag_note
             + "\n\nFeel free to include any extra context about the case."
@@ -575,12 +619,18 @@ class DocumentAgentService:
         fir = collected.get("fir_number", "")
 
         if slot_name == "bail_grounds":
+            case_summary = collected.get("case_summary", "")
+            accused_address = collected.get("accused_address", "")
+            police_station = collected.get("police_station", "")
+            district = collected.get("district", "")
+
             # Use multiple targeted queries to get substantive legal content, not TOC
             queries = [
-                f"bail granted section {sections} PPC conditions grounds",
-                f"bail application arguments accused not flight risk section {sections}",
-                f"Section 497 CrPC bail entitlement pre-trial detention",
-                f"bail grounds investigation complete no further custody required",
+                f"bail granted section {sections} PPC conditions grounds Pakistan",
+                f"bail application grounds section {sections} accused not flight risk",
+                f"Section 497 498 CrPC bail entitlement pre-trial custody Pakistan",
+                f"bail grounds investigation complete no further custody required PPC",
+                f"bail cancellation refused grounds Pakistan court",
             ]
             try:
                 svc = RAGRetrievalService()
@@ -589,14 +639,13 @@ class DocumentAgentService:
                     chunks = await svc.retrieve(q, domain_namespace, top_k=3)
                     all_chunks.extend(chunks)
 
-                # Filter out TOC-like chunks (short, numbered lists, no substantive text)
+                # Filter out TOC-like chunks
                 substantive = [
                     c for c in all_chunks
-                    if c.get("confidence", 0) > 0.35
+                    if c.get("confidence", 0) > 0.30
                     and len(c.get("chunk_text", "")) > 150
                     and not _is_toc_chunk(c.get("chunk_text", ""))
                 ]
-                # Deduplicate by text prefix
                 seen: set[str] = set()
                 unique_chunks: list[dict] = []
                 for c in substantive:
@@ -606,35 +655,61 @@ class DocumentAgentService:
                         unique_chunks.append(c)
 
                 context = "\n\n".join(c["chunk_text"] for c in unique_chunks[:6])
-                if context:
-                    prompt = (
-                        f"You are a Pakistani legal expert drafting bail grounds for a bail application.\n"
-                        f"Case details:\n"
-                        f"  Accused: {accused}\n"
-                        f"  FIR No: {fir}\n"
-                        f"  Penal Sections: {sections}\n\n"
-                        f"Relevant legal context from Pakistani law:\n{context}\n\n"
-                        f"Write 4-6 specific, persuasive bail grounds. Requirements:\n"
-                        f"- Use formal Pakistani legal language\n"
-                        f"- Reference Section 497/498 Cr.P.C. where appropriate\n"
-                        f"- Address the specific charges under section {sections}\n"
-                        f"- Include grounds like: no criminal antecedents, investigation complete, "
-                        f"  not a flight risk, family responsibilities, right to fair trial\n"
-                        f"- Each ground must be a complete, arguable legal point\n"
-                        f"- Do NOT include table of contents or section headers\n"
-                        f"Return only the numbered bail grounds, no preamble."
-                    )
-                    return await _call_gemini(prompt)
             except Exception as e:
                 logger.warning("rag_slot_fill_failed", slot=slot_name, error=str(e))
+                context = ""
 
-            # Fallback if RAG retrieval fails
-            return (
-                f"1. The accused is not a flight risk and will cooperate with investigations.\n"
-                f"2. The alleged offence is bailable under the relevant provisions.\n"
-                f"3. The accused has strong community ties and family responsibilities.\n"
-                f"4. Continued detention serves no useful purpose as investigation is complete.\n"
-                f"5. The accused is entitled to bail under Section 497 Cr.P.C."
+            prompt = (
+                f"You are a seasoned Pakistani criminal defense lawyer with 20+ years of experience "
+                f"in Sindh courts. Your bail applications have an excellent success rate.\n\n"
+                f"Write STRONG, SPECIFIC bail grounds for this case. You must:\n"
+                f"1. Analyze the exact sections ({sections}) and identify which are bailable vs non-bailable\n"
+                f"2. Craft arguments specifically addressing why bail should be granted DESPITE those sections\n"
+                f"3. Use case law and statutory provisions from Pakistani law\n"
+                f"4. If any names/addresses are in Urdu/Sindhi script, refer to them in English transliteration\n\n"
+                f"CASE DETAILS:\n"
+                f"  Accused: {accused}\n"
+                f"  Address: {accused_address}\n"
+                f"  FIR No: {fir}, Police Station: {police_station}, District: {district}\n"
+                f"  Sections charged: {sections}\n"
+                f"  Case narrative summary: {case_summary[:500] if case_summary else 'Not provided'}\n\n"
+                + (f"RELEVANT LEGAL REFERENCES FROM KNOWLEDGE BASE:\n{context}\n\n" if context else "")
+                + f"Write 6-8 numbered bail grounds. Each ground must:\n"
+                f"- Be a complete, self-contained legal argument\n"
+                f"- Reference specific statutory provisions (Section 497 Cr.P.C., relevant PPC sections)\n"
+                f"- Be written in formal, court-ready English\n"
+                f"- Be persuasive and factually grounded in the case details above\n"
+                f"- Address the seriousness of the charge and rebut custody justification\n\n"
+                f"REQUIRED GROUNDS TO COVER (use all):\n"
+                f"i. Bail entitlement under Section 497/498 Cr.P.C.\n"
+                f"ii. Investigation complete / police challan filed\n"
+                f"iii. Accused not a flight risk (local resident with family)\n"
+                f"iv. No previous criminal record / first offender\n"
+                f"v. Right to fair trial and presumption of innocence\n"
+                f"vi. Section-specific mitigating factors for {sections}\n"
+                f"vii. Extended pre-trial detention is punitive and unjust\n"
+                f"viii. Accused will cooperate with court proceedings\n\n"
+                f"Return ONLY the numbered grounds in formal legal English. No preamble."
+            )
+            result = await _call_gemini(prompt)
+            return result if result.strip() else (
+                f"i. The accused is entitled to bail under Section 497 Cr.P.C. as the investigation "
+                f"has been completed and the challan has been/is being filed before this Honourable Court.\n"
+                f"ii. The accused is not a flight risk. He is a permanent resident of the district "
+                f"with strong family and community ties and has no means or reason to abscond.\n"
+                f"iii. The accused has no prior criminal record and is a first-time offender. "
+                f"His continued detention pending trial serves no legitimate penological purpose.\n"
+                f"iv. The prosecution's case rests on disputed facts. The accusations are denied "
+                f"in toto and the accused is presumed innocent until proven guilty.\n"
+                f"v. Continued incarceration of the accused is causing undue hardship to his "
+                f"dependants and family, who rely on him for their sustenance and welfare.\n"
+                f"vi. The offences charged under section {sections} are disputed in their "
+                f"applicability. The factual matrix does not support the gravity attributed "
+                f"to the alleged offence.\n"
+                f"vii. The accused undertakes to abide by all conditions of bail and to appear "
+                f"before this Honourable Court whenever required.\n"
+                f"viii. The ends of justice will be better served by releasing the accused on bail "
+                f"with appropriate surety conditions rather than continued pre-trial detention."
             )
 
         return ""
@@ -648,6 +723,16 @@ class DocumentAgentService:
             value = state["collected"].get(s["name"])
             label = s.get("label") or _to_label(s["name"])
             lines.append(f"• **{label}**: {value or '*(not provided)*'}")
+        # FIR auto-filled slots
+        fir_filled = state.get("fir_filled", [])
+        if fir_filled:
+            all_slots = state["template"].get("slot_definitions", [])
+            slot_map = {s["name"]: s for s in all_slots}
+            for name in fir_filled:
+                value = state["collected"].get(name)
+                label = slot_map.get(name, {}).get("label") or _to_label(name)
+                lines.append(f"• **{label}**: {value} 📋 *(from FIR)*")
+
         # Profile auto-filled slots
         profile_filled = state.get("profile_filled", [])
         if profile_filled:

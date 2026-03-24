@@ -16,6 +16,7 @@ class ConversationRequest(BaseModel):
     language_hint: Optional[str] = None  # 'english' | 'urdu' | 'sindhi' | None (auto-detect)
     domain_id: Optional[str] = None  # overrides user's assigned domain if provided
     session_id: Optional[str] = None  # for conversation continuity
+    fir_fields: Optional[Dict[str, Any]] = None  # structured FIR data to pre-fill document slots
 
 
 class ConversationResponse(BaseModel):

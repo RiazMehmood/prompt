@@ -80,6 +80,8 @@ def create_app() -> FastAPI:
     from src.api.v1.templates import router as templates_router
     from src.api.v1.institutes import router as institutes_router
     from src.api.v1.staff import router as staff_router
+    from src.api.v1.fir import router as fir_router
+    from src.api.v1.cases import router as cases_router
 
     app.include_router(auth_router, prefix="/auth", tags=["Authentication"])
     app.include_router(domains_router, prefix="/domains", tags=["Domains"])
@@ -94,6 +96,8 @@ def create_app() -> FastAPI:
     app.include_router(templates_router, prefix="/templates", tags=["Templates"])
     app.include_router(institutes_router, prefix="/institutes", tags=["Institutes"])
     app.include_router(staff_router, prefix="/admin/staff", tags=["Staff"])
+    app.include_router(fir_router, prefix="/api/fir", tags=["FIR Extraction"])
+    app.include_router(cases_router, prefix="/api/cases", tags=["Cases"])
 
     @app.get("/health", tags=["System"])
     async def health() -> JSONResponse:
