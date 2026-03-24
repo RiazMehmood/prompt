@@ -1274,25 +1274,7 @@ export default function UserChatPage() {
                 <p className="text-xs text-gray-400 mt-1">{domainName} domain</p>
               )}
 
-              {/* FIR Upload card — prominent for Legal domain */}
-              {domainName === 'Legal' && (
-                <div className="mt-6 mx-auto max-w-sm">
-                  <button
-                    onClick={() => firFileRef.current?.click()}
-                    className="w-full flex items-center gap-3 px-5 py-4 bg-gray-900 text-white rounded-2xl hover:bg-gray-800 transition shadow-lg group"
-                  >
-                    <span className="text-2xl">📋</span>
-                    <div className="text-left">
-                      <p className="text-sm font-bold">Upload FIR Document</p>
-                      <p className="text-xs text-gray-300">AI extracts all case details automatically</p>
-                    </div>
-                    <svg className="w-4 h-4 ml-auto text-gray-400 group-hover:text-white transition" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                    </svg>
-                  </button>
-                  <p className="text-xs text-gray-400 mt-2">Select 1–6 files (pages) · PDF, JPEG, PNG · Urdu/Sindhi photocopies supported</p>
-                </div>
-              )}
+
 
               <div className="mt-5 space-y-2 text-xs text-gray-400">
                 {domainUI.suggestions.map((s, i) => <p key={i}>{s}</p>)}
@@ -1411,11 +1393,6 @@ export default function UserChatPage() {
               Send
             </button>
           </div>
-          {domainName === 'Legal' && firStep === 'idle' && (
-            <p className="text-center text-xs text-gray-400 mt-2">
-              📋 <button onClick={() => firFileRef.current?.click()} className="underline hover:text-gray-600 transition">Upload FIR</button> to auto-extract all case details · or type your question
-            </p>
-          )}
         </div>
       </div>
 
