@@ -40,29 +40,36 @@ def _is_toc_chunk(text: str) -> bool:
 # In-memory session store — keyed by session_id
 _SESSIONS: dict[str, dict] = {}
 
-# Slot names that AI fills from RAG (not asked from user)
-RAG_SLOTS = {"bail_grounds"}
-# Slots AI fills automatically without asking user
+# Slot names that AI fills from RAG or auto-logic — NEVER asked from user
+RAG_SLOTS = {
+    "bail_grounds",   # researched from legal KB
+    "bail_section",   # auto-derived from PPC sections (497/498 CrPC)
+    "case_facts",     # derived from FIR case_summary
+    "sections",       # taken from FIR; fallback RAG lookup
+    "bail_type",      # pre-arrest / post-arrest derived from context
+}
+# Slots AI fills automatically without asking user (date, etc.)
 AUTO_SLOTS = {"application_date"}
 
-# FIR field → template slot name mapping
-# These slots are auto-filled from FIR extraction data when available
-FIR_SLOT_MAP: dict[str, str] = {
-    "fir_number":          "fir_number",
-    "fir_date":            "fir_date",
-    "police_station":      "police_station",
-    "district":            "district",
-    "sections":            "sections",
-    "accused_name":        "accused_name",
-    "accused_father_name": "accused_father_name",
-    "accused_address":     "accused_address",
-    "accused_caste":       "accused_caste",
-    "complainant_name":    "complainant_name",
-    "incident_date":       "incident_date",
-    "incident_location":   "incident_location",
-    "case_summary":        "case_summary",
-    "investigating_officer": "investigating_officer",
-    "witnesses":           "witnesses",
+# FIR field → one or more template slot names (all auto-filled from FIR when available)
+# Each FIR key maps to a list of slot names it should fill
+FIR_SLOT_MAP: dict[str, list[str]] = {
+    "fir_number":          ["fir_number"],
+    "fir_date":            ["fir_date"],
+    "police_station":      ["police_station"],
+    "district":            ["district"],
+    "sections":            ["sections"],
+    "accused_name":        ["accused_name"],
+    "accused_father_name": ["accused_father_name"],
+    "accused_address":     ["accused_address"],
+    "accused_caste":       ["accused_caste"],
+    "complainant_name":    ["complainant_name"],
+    "incident_date":       ["incident_date"],
+    "incident_location":   ["incident_location"],
+    # FIR narrative fills both case_summary and case_facts slots
+    "case_summary":        ["case_summary", "case_facts"],
+    "investigating_officer": ["investigating_officer"],
+    "witnesses":           ["witnesses"],
 }
 
 # Map from slot name → professional_details key
@@ -227,22 +234,25 @@ class DocumentAgentService:
 
         # Pre-fill FIR-derived slots (fields extracted from uploaded FIR document)
         fir_filled: dict[str, str] = {}
+        slot_names_in_template = {s["name"] for s in slots}
         if fir_context:
-            for fir_key, slot_key in FIR_SLOT_MAP.items():
+            for fir_key, slot_keys in FIR_SLOT_MAP.items():
                 val = fir_context.get(fir_key)
                 if val and str(val).strip():
-                    # Check if template has this slot
-                    for s in slots:
-                        if s["name"] == slot_key:
+                    for slot_key in slot_keys:
+                        if slot_key in slot_names_in_template:
                             fir_filled[slot_key] = str(val).strip()
-                            break
         pre_filled.update(fir_filled)
 
-        # Only ask for user_input slots that are not pre-filled from profile or FIR
+        # Only ask for user_input slots that are not:
+        # - already pre-filled from FIR or profile
+        # - in AUTO_SLOTS (date etc.)
+        # - in RAG_SLOTS (AI researches/derives these — never ask user)
         user_slots = [
             s for s in slots
             if s.get("data_source") == "user_input"
             and s["name"] not in AUTO_SLOTS
+            and s["name"] not in RAG_SLOTS
             and s["name"] not in pre_filled
         ]
         rag_slot_names = [
@@ -415,13 +425,24 @@ class DocumentAgentService:
         template = state["template"]
         collected = dict(state["collected"])
 
-        # Auto-fill date if missing
+        # Auto-fill date and year fields
         collected.setdefault("application_date", date.today().isoformat())
+        collected.setdefault("case_year", str(date.today().year))
+        # Derive case_year from fir_date if available
+        fir_date = collected.get("fir_date", "")
+        if fir_date:
+            import re as _re
+            yr = _re.search(r"(20\d{2})", str(fir_date))
+            if yr:
+                collected["case_year"] = yr.group(1)
 
-        # Fill RAG slots
+        # Fill RAG slots — skip if already collected from FIR (except bail_grounds which always regenerates)
         for slot_name in state.get("rag_slot_names", []):
+            if collected.get(slot_name) and slot_name != "bail_grounds":
+                continue  # FIR-filled value wins
             value = await self._fill_rag_slot(slot_name, collected, domain_namespace, template)
-            collected[slot_name] = value
+            if value:
+                collected[slot_name] = value
 
         # Load sample format reference if admin uploaded one
         sample_text: str = ""
@@ -666,6 +687,70 @@ class DocumentAgentService:
         sections = collected.get("sections", "")
         accused = collected.get("accused_name", "")
         fir = collected.get("fir_number", "")
+
+        # ── Already collected from FIR → never overwrite ──────────────────────
+        if collected.get(slot_name) and slot_name not in {"bail_grounds"}:
+            return collected[slot_name]
+
+        # ── bail_section: CrPC procedural section for bail ────────────────────
+        if slot_name in ("bail_section", "crpc_section", "bail_procedure_section"):
+            # Non-bailable offenses (murder 302, terrorism, kidnapping 365B etc.)
+            # use Section 497(2) CrPC or Sessions Court under 498 CrPC
+            serious = {"302", "303", "311", "365b", "365a", "324", "392", "394", "395", "396"}
+            secs_lower = sections.lower().replace("ppc", "").replace("p.p.c", "")
+            is_serious = any(s.strip() in secs_lower for s in serious)
+            if is_serious:
+                return (
+                    "Section 497(2) read with Section 498 of the Code of Criminal Procedure, 1898"
+                )
+            return "Section 497(1) of the Code of Criminal Procedure, 1898"
+
+        # ── bail_type: pre-arrest or post-arrest bail ─────────────────────────
+        if slot_name == "bail_type":
+            return "Post-Arrest Bail"
+
+        # ── case_facts: derive from FIR case_summary ──────────────────────────
+        if slot_name in ("case_facts", "case_description"):
+            summary = (
+                collected.get("case_facts")
+                or collected.get("case_summary")
+                or collected.get("case_description")
+                or ""
+            )
+            if summary:
+                # Translate if needed and format as formal case facts
+                prompt = (
+                    f"Translate and rewrite the following FIR case narrative as formal English "
+                    f"'Brief Facts of the Case' for a Pakistani bail application. "
+                    f"Keep all proper nouns, dates, locations, and legal details. "
+                    f"Write in third person, past tense, formal legal English.\n\n"
+                    f"FIR Narrative: {summary}\n\n"
+                    f"Return only the formatted case facts, no preamble."
+                )
+                try:
+                    return await _call_gemini(prompt)
+                except Exception:
+                    return summary
+            return ""
+
+        # ── sections: use FIR sections; fallback RAG ──────────────────────────
+        if slot_name == "sections":
+            fir_sections = collected.get("sections", "")
+            if fir_sections:
+                return fir_sections
+            # RAG lookup for applicable sections based on case narrative
+            summary = collected.get("case_summary", "")
+            if summary:
+                prompt = (
+                    f"Based on this FIR case: {summary[:300]}\n"
+                    f"What PPC/CNSA sections would typically apply? "
+                    f"Return only the section numbers like '302/34 PPC'"
+                )
+                try:
+                    return await _call_gemini(prompt)
+                except Exception:
+                    pass
+            return ""
 
         if slot_name == "bail_grounds":
             case_summary = collected.get("case_summary", "")
