@@ -2,11 +2,12 @@
 import DashboardShell from '@/components/DashboardShell';
 
 const nav = [
-  { href: '/domain-admin',           label: 'Overview',    icon: 'home'      },
-  { href: '/domain-admin/analytics', label: 'Analytics',   icon: 'analytics' },
-  { href: '/domain-admin/users',     label: 'Users',       icon: 'users'     },
-  { href: '/domain-admin/documents', label: 'Documents',   icon: 'documents' },
-  { href: '/domain-admin/templates', label: 'Templates',   icon: 'templates' },
+  { href: '/domain-admin',                        label: 'Overview',        icon: 'home'      },
+  { href: '/domain-admin/analytics',              label: 'Analytics',       icon: 'analytics' },
+  { href: '/domain-admin/users',                  label: 'Users',           icon: 'users'     },
+  { href: '/domain-admin/documents',              label: 'KB Documents',    icon: 'documents' },
+  { href: '/domain-admin/templates',              label: 'Templates',       icon: 'templates' },
+  { href: '/domain-admin/template-submissions',   label: 'Template Queue',  icon: 'inbox'     },
 ];
 
 export default function DomainAdminLayout({ children }: { children: React.ReactNode }) {

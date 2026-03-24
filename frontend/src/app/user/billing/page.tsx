@@ -194,8 +194,17 @@ export default function UserBillingPage() {
   const [tiers, setTiers] = useState<Tier[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [isInstMember, setIsInstMember] = useState(false);
 
   useEffect(() => {
+    // Institute members cannot manage their own billing
+    const raw = localStorage.getItem('auth_user');
+    if (raw) {
+      try {
+        const u = JSON.parse(raw);
+        if (u?.institute_id) { setIsInstMember(true); setLoading(false); return; }
+      } catch {}
+    }
     Promise.all([
       apiFetch<Sub>('/subscriptions/current'),
       apiFetch<Tier[]>('/subscriptions/tiers'),
@@ -207,6 +216,24 @@ export default function UserBillingPage() {
 
   if (loading) return <div className="text-gray-400 pt-8 text-center">Loading…</div>;
   if (error)   return <div className="bg-red-50 text-red-700 rounded-xl p-4 text-sm">{error}</div>;
+
+  // Institute members: show info panel only, no upgrade options
+  if (isInstMember) {
+    return (
+      <div className="max-w-2xl mx-auto pt-8">
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-8 text-center">
+          <span className="text-4xl">🏢</span>
+          <h2 className="text-xl font-bold text-amber-900 mt-4 mb-2">Managed by Your Institute</h2>
+          <p className="text-amber-800 text-sm leading-relaxed">
+            Your subscription is managed by your institution. You cannot upgrade or change plans individually.
+          </p>
+          <p className="text-amber-700 text-xs mt-3">
+            Contact your institute administrator to request a plan change or renewal.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   const col = TIER_COLOR[sub?.tier ?? 'free_trial'] ?? TIER_COLOR.free_trial;
   const periodLabel = sub?.limits.limit_period === 'weekly' ? 'this week' : 'today';

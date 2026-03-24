@@ -185,3 +185,111 @@ async def upload_sample(
     admin.table("templates").update({"formatting_rules": rules}).eq("id", template_id).execute()
     logger.info("sample_uploaded", template_id=template_id, filename=file.filename)
     return {"message": "Sample uploaded", "sample_filename": file.filename}
+
+
+# ── Template Submissions (user/institute → admin review) ──────────────────────
+
+class SubmissionCreate(BaseModel):
+    name: str
+    description: str = ""
+    content: str
+    slot_definitions: List[Dict[str, Any]] = []
+
+
+class SubmissionResponse(BaseModel):
+    id: str
+    name: str
+    description: str | None
+    status: str
+    review_notes: str | None
+    created_at: datetime
+    template_id: str | None = None
+
+
+@router.post("/submissions", response_model=SubmissionResponse)
+async def submit_template(body: SubmissionCreate, current_user: CurrentUser) -> SubmissionResponse:
+    """Submit a custom template for admin review. Any authenticated domain user may submit."""
+    if not current_user.domain_id:
+        raise HTTPException(status_code=400, detail="You must be assigned to a domain first.")
+    admin = get_supabase_admin()
+    row = {
+        "domain_id":       current_user.domain_id,
+        "submitted_by":    current_user.id,
+        "institute_id":    current_user.institute_id,
+        "name":            body.name,
+        "description":     body.description,
+        "content":         body.content,
+        "slot_definitions": body.slot_definitions,
+        "status":          "pending",
+    }
+    res = admin.table("template_submissions").insert(row).execute()
+    data = res.data[0]
+    logger.info("template_submitted", submission_id=data["id"], user=current_user.id)
+    return SubmissionResponse(**{k: data.get(k) for k in SubmissionResponse.model_fields})
+
+
+@router.get("/submissions", response_model=List[SubmissionResponse])
+async def list_submissions(current_user: CurrentUser) -> List[SubmissionResponse]:
+    """List template submissions. Admins see all in their domain; users see own."""
+    admin = get_supabase_admin()
+    q = admin.table("template_submissions").select("*")
+    if current_user.role in ("root_admin", "domain_admin", "staff"):
+        if current_user.domain_id and current_user.role != "root_admin":
+            q = q.eq("domain_id", current_user.domain_id)
+    else:
+        q = q.eq("submitted_by", current_user.id)
+    res = q.order("created_at", desc=True).execute()
+    return [SubmissionResponse(**{k: r.get(k) for k in SubmissionResponse.model_fields}) for r in (res.data or [])]
+
+
+class SubmissionReview(BaseModel):
+    action: str   # "approve" or "reject"
+    review_notes: str = ""
+
+
+@router.patch("/submissions/{submission_id}/review")
+async def review_submission(
+    submission_id: str,
+    body: SubmissionReview,
+    current_user: ManageTemplatesUser,
+) -> dict:
+    """Approve or reject a template submission. On approval, creates live template."""
+    admin = get_supabase_admin()
+    sub = admin.table("template_submissions").select("*").eq("id", submission_id).single().execute().data
+    if not sub:
+        raise HTTPException(status_code=404, detail="Submission not found.")
+    if sub["status"] != "pending":
+        raise HTTPException(status_code=400, detail="Submission already reviewed.")
+
+    if body.action == "approve":
+        # Create live template from submission
+        tpl = admin.table("templates").insert({
+            "domain_id":       sub["domain_id"],
+            "name":            sub["name"],
+            "description":     sub["description"] or "",
+            "content":         sub["content"],
+            "slot_definitions": sub["slot_definitions"],
+            "formatting_rules": {},
+            "version":         "1.0.0",
+            "is_active":       True,
+            "created_by":      sub["submitted_by"],
+        }).execute().data[0]
+        admin.table("template_submissions").update({
+            "status":      "approved",
+            "reviewed_by": current_user.id,
+            "reviewed_at": "now()",
+            "review_notes": body.review_notes,
+            "template_id": tpl["id"],
+        }).eq("id", submission_id).execute()
+        logger.info("template_submission_approved", submission_id=submission_id, template_id=tpl["id"])
+        return {"status": "approved", "template_id": tpl["id"]}
+
+    # Reject
+    admin.table("template_submissions").update({
+        "status":      "rejected",
+        "reviewed_by": current_user.id,
+        "reviewed_at": "now()",
+        "review_notes": body.review_notes,
+    }).eq("id", submission_id).execute()
+    logger.info("template_submission_rejected", submission_id=submission_id)
+    return {"status": "rejected"}
