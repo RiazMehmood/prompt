@@ -58,10 +58,22 @@ export default function UsersPage() {
   const [userCreateError, setUserCreateError] = useState('');
   const [userCreateSuccess, setUserCreateSuccess] = useState('');
 
+  // CSV import
+  const [showImport, setShowImport] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importDomainId, setImportDomainId] = useState('');
+  const [importInstituteId, setImportInstituteId] = useState('');
+  const [importTier, setImportTier] = useState('basic');
+  const [importLoading, setImportLoading] = useState(false);
+  const [importResult, setImportResult] = useState<{ created: number; skipped: number; failed: number; errors: string[] } | null>(null);
+  const [importError, setImportError] = useState('');
+  const [institutes, setInstitutes] = useState<{ id: string; name: string }[]>([]);
+
   const PAGE_SIZE = 20;
 
   useEffect(() => {
     fetchDomains();
+    fetchInstitutes();
   }, []);
 
   useEffect(() => {
@@ -74,6 +86,43 @@ export default function UsersPage() {
       const data = await res.json();
       setDomains(data || []);
     } catch {}
+  }
+
+  async function fetchInstitutes() {
+    try {
+      const res = await fetch(`${API_BASE}/api/institutes?page_size=100`, { headers: getAuthHeader() });
+      const data = await res.json();
+      setInstitutes(data?.institutes || []);
+    } catch {}
+  }
+
+  async function importUsersCSV(e: React.FormEvent) {
+    e.preventDefault();
+    if (!importFile) return;
+    setImportLoading(true);
+    setImportError('');
+    setImportResult(null);
+    try {
+      const form = new FormData();
+      form.append('file', importFile);
+      if (importDomainId) form.append('domain_id', importDomainId);
+      if (importInstituteId) form.append('institute_id', importInstituteId);
+      form.append('subscription_tier', importTier);
+
+      const res = await fetch(`${API_BASE}/admin/import-users`, {
+        method: 'POST',
+        headers: getAuthHeader(),
+        body: form,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.detail ?? 'Import failed');
+      setImportResult(data);
+      fetchUsers();
+    } catch (err: any) {
+      setImportError(err.message);
+    } finally {
+      setImportLoading(false);
+    }
   }
 
   async function fetchUsers() {
@@ -214,6 +263,12 @@ export default function UsersPage() {
           <p className="text-gray-500 text-sm mt-1">{total} total users</p>
         </div>
         <div className="flex gap-2">
+          <button
+            onClick={() => { setShowImport(true); setImportFile(null); setImportResult(null); setImportError(''); }}
+            className="border border-gray-300 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-100 transition"
+          >
+            Import CSV
+          </button>
           <button
             onClick={() => { setShowCreateUser(true); setUserCreateError(''); setUserCreateSuccess(''); }}
             className="border border-gray-300 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-100 transition"
@@ -508,6 +563,122 @@ export default function UsersPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* CSV Import Modal */}
+      {showImport && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 w-[480px] shadow-xl">
+            <h2 className="text-lg font-bold mb-1">Bulk Import Users (CSV)</h2>
+            <p className="text-xs text-gray-500 mb-4">
+              CSV must have a header row. Required column: <code className="bg-gray-100 px-1 rounded">email</code>.
+              Optional: <code className="bg-gray-100 px-1 rounded">password</code> (auto-generated if omitted).
+            </p>
+
+            {importError && <div className="bg-red-50 text-red-700 text-sm rounded-lg p-3 mb-3">{importError}</div>}
+
+            {importResult ? (
+              <div className="space-y-3">
+                <div className="grid grid-cols-3 gap-3 text-center">
+                  <div className="bg-green-50 rounded-lg p-3">
+                    <p className="text-2xl font-bold text-green-700">{importResult.created}</p>
+                    <p className="text-xs text-green-600">Created</p>
+                  </div>
+                  <div className="bg-yellow-50 rounded-lg p-3">
+                    <p className="text-2xl font-bold text-yellow-700">{importResult.skipped}</p>
+                    <p className="text-xs text-yellow-600">Skipped</p>
+                  </div>
+                  <div className="bg-red-50 rounded-lg p-3">
+                    <p className="text-2xl font-bold text-red-700">{importResult.failed}</p>
+                    <p className="text-xs text-red-600">Failed</p>
+                  </div>
+                </div>
+                {importResult.errors.length > 0 && (
+                  <div className="bg-red-50 rounded-lg p-3 max-h-32 overflow-y-auto">
+                    <p className="text-xs font-medium text-red-700 mb-1">Errors:</p>
+                    {importResult.errors.map((err, i) => (
+                      <p key={i} className="text-xs text-red-600">{err}</p>
+                    ))}
+                  </div>
+                )}
+                <button
+                  onClick={() => { setShowImport(false); setImportResult(null); }}
+                  className="w-full bg-gray-900 text-white py-2 rounded-lg text-sm font-medium hover:bg-gray-700"
+                >
+                  Done
+                </button>
+              </div>
+            ) : (
+              <form onSubmit={importUsersCSV} className="space-y-3">
+                <div>
+                  <label className="text-xs text-gray-600 font-medium block mb-1">CSV File</label>
+                  <input
+                    type="file"
+                    accept=".csv,text/csv"
+                    required
+                    onChange={(e) => setImportFile(e.target.files?.[0] ?? null)}
+                    className="w-full text-sm text-gray-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border file:border-gray-200 file:text-xs file:font-medium file:bg-gray-50 file:text-gray-700 hover:file:bg-gray-100"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-600 font-medium block mb-1">Assign Domain (optional)</label>
+                  <select
+                    value={importDomainId}
+                    onChange={(e) => setImportDomainId(e.target.value)}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none"
+                  >
+                    <option value="">None</option>
+                    {domains.map((d) => (
+                      <option key={d.id} value={d.id}>{d.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-600 font-medium block mb-1">Assign Institute (optional)</label>
+                  <select
+                    value={importInstituteId}
+                    onChange={(e) => setImportInstituteId(e.target.value)}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none"
+                  >
+                    <option value="">None</option>
+                    {institutes.map((inst) => (
+                      <option key={inst.id} value={inst.id}>{inst.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-600 font-medium block mb-1">Subscription Tier</label>
+                  <select
+                    value={importTier}
+                    onChange={(e) => setImportTier(e.target.value)}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none"
+                  >
+                    <option value="free_trial">free_trial</option>
+                    <option value="basic">basic</option>
+                    <option value="standard">standard</option>
+                    <option value="premium">premium</option>
+                  </select>
+                </div>
+                <div className="flex gap-3 pt-2">
+                  <button
+                    type="submit"
+                    disabled={importLoading || !importFile}
+                    className="flex-1 bg-gray-900 text-white py-2 rounded-lg text-sm font-medium hover:bg-gray-700 disabled:opacity-50"
+                  >
+                    {importLoading ? 'Importing...' : 'Import'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowImport(false)}
+                    className="flex-1 border border-gray-200 text-gray-700 py-2 rounded-lg text-sm hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
         </div>
       )}

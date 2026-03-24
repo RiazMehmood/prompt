@@ -51,13 +51,16 @@ export default function InstitutesPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState({
     name: '', domain_id: '', contact_email: '', contact_phone: '',
-    address: '', subscription_plan: 'bulk', discount_pct: 0, max_users: 50, notes: ''
+    address: '', subscription_plan: 'bulk', discount_pct: 0, max_users: 50, notes: '',
+    // admin credentials — created together with the institute
+    admin_email: '', admin_password: '',
   });
   const [createError, setCreateError] = useState('');
 
   const [editItem, setEditItem] = useState<Institute | null>(null);
   const [editForm, setEditForm] = useState<Partial<Institute>>({});
 
+  // "Edit Admin" modal — change password for an existing institute admin
   const [showAdminModal, setShowAdminModal] = useState<string | null>(null); // institute_id
   const [adminForm, setAdminForm] = useState({ email: '', password: '' });
   const [adminMsg, setAdminMsg] = useState('');
@@ -90,15 +93,35 @@ export default function InstitutesPage() {
 
   async function createInstitute(e: React.FormEvent) {
     e.preventDefault(); setCreateError('');
+    // Step 1: create the institute
+    const { admin_email, admin_password, ...instituteData } = form;
     const r = await fetch(`${API_BASE}/institutes`, {
       method: 'POST',
       headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
-      body: JSON.stringify(form),
+      body: JSON.stringify(instituteData),
     });
     const d = await r.json();
-    if (!r.ok) { setCreateError(d?.error?.message ?? d?.detail ?? 'Failed'); return; }
+    if (!r.ok) { setCreateError(d?.error?.message ?? d?.detail ?? 'Failed to create institute'); return; }
+
+    // Step 2: create the admin account using the institute's contact_email as login
+    const email = admin_email || form.contact_email;
+    const password = admin_password;
+    if (email && password) {
+      const ar = await fetch(`${API_BASE}/institutes/${d.id}/create-admin`, {
+        method: 'POST',
+        headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password, institute_id: d.id }),
+      });
+      if (!ar.ok) {
+        const ad = await ar.json();
+        setCreateError(`Institute created but admin creation failed: ${ad?.detail ?? 'unknown error'}. Use "+ Admin" on the row to retry.`);
+        fetchInstitutes();
+        return;
+      }
+    }
+
     setShowCreate(false);
-    setForm({ name: '', domain_id: '', contact_email: '', contact_phone: '', address: '', subscription_plan: 'bulk', discount_pct: 0, max_users: 50, notes: '' });
+    setForm({ name: '', domain_id: '', contact_email: '', contact_phone: '', address: '', subscription_plan: 'bulk', discount_pct: 0, max_users: 50, notes: '', admin_email: '', admin_password: '' });
     fetchInstitutes();
   }
 
@@ -131,16 +154,19 @@ export default function InstitutesPage() {
     fetchInstitutes();
   }
 
-  async function createInstAdmin(e: React.FormEvent) {
+  async function updateInstAdmin(e: React.FormEvent) {
     e.preventDefault(); setAdminMsg('');
-    const r = await fetch(`${API_BASE}/institutes/${showAdminModal}/create-admin`, {
-      method: 'POST',
+    const payload: Record<string, string> = {};
+    if (adminForm.email) payload.email = adminForm.email;
+    if (adminForm.password) payload.password = adminForm.password;
+    const r = await fetch(`${API_BASE}/institutes/${showAdminModal}/admin`, {
+      method: 'PATCH',
       headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...adminForm, institute_id: showAdminModal }),
+      body: JSON.stringify(payload),
     });
     const d = await r.json();
-    if (!r.ok) { setAdminMsg(d?.error?.message ?? d?.detail ?? 'Failed'); return; }
-    setAdminMsg(`Admin created: ${d.email}`);
+    if (!r.ok) { setAdminMsg(d?.detail ?? 'Failed'); return; }
+    setAdminMsg(`Admin updated: ${d.email}`);
     setAdminForm({ email: '', password: '' });
   }
 
@@ -209,8 +235,8 @@ export default function InstitutesPage() {
                 <td className="px-4 py-3 flex gap-2 flex-wrap">
                   <button onClick={() => { setEditItem(inst); setEditForm({ ...inst }); }}
                     className="text-xs text-blue-600 hover:text-blue-800 font-medium">Edit</button>
-                  <button onClick={() => { setShowAdminModal(inst.id); setAdminMsg(''); }}
-                    className="text-xs text-purple-600 hover:text-purple-800 font-medium">+ Admin</button>
+                  <button onClick={() => { setShowAdminModal(inst.id); setAdminMsg(''); setAdminForm({ email: '', password: '' }); }}
+                    className="text-xs text-purple-600 hover:text-purple-800 font-medium">Edit Admin</button>
                   <button onClick={() => setDeleteConfirm(inst.id)}
                     className="text-xs text-red-500 hover:text-red-700 font-medium">Delete</button>
                 </td>
@@ -283,6 +309,28 @@ export default function InstitutesPage() {
                 <textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })}
                   rows={2} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none" />
               </div>
+
+              {/* Admin account — created at the same time */}
+              <div className="border-t border-gray-100 pt-3 mt-1">
+                <p className="text-xs font-semibold text-gray-700 mb-2">Admin Account</p>
+                <div className="space-y-2">
+                  <div>
+                    <label className="text-xs text-gray-600 font-medium block mb-1">Admin Email *</label>
+                    <input type="email" required value={form.admin_email}
+                      onChange={e => setForm({ ...form, admin_email: e.target.value })}
+                      placeholder="Same as contact email or different"
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-600 font-medium block mb-1">Admin Password *</label>
+                    <input type="password" required minLength={8} value={form.admin_password}
+                      onChange={e => setForm({ ...form, admin_password: e.target.value })}
+                      placeholder="Min 8 characters"
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none" />
+                  </div>
+                </div>
+              </div>
+
               <div className="flex gap-3 pt-2">
                 <button type="submit" className="flex-1 bg-gray-900 text-white py-2 rounded-lg text-sm font-medium hover:bg-gray-700">
                   Create Institute
@@ -342,26 +390,28 @@ export default function InstitutesPage() {
         </div>
       )}
 
-      {/* Create Institute Admin Modal */}
+      {/* Edit Institute Admin Modal */}
       {showAdminModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl p-6 w-96 shadow-xl">
-            <h2 className="text-lg font-bold mb-2">Create Institute Admin</h2>
-            <p className="text-sm text-gray-500 mb-4">This admin can manage users within their institute.</p>
+            <h2 className="text-lg font-bold mb-2">Edit / Reset Admin Credentials</h2>
+            <p className="text-sm text-gray-500 mb-4">Enter new credentials to replace the existing institute admin, or create one if none exists.</p>
             {adminMsg && <div className={`text-sm rounded-lg p-3 mb-3 ${adminMsg.startsWith('Admin created') ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>{adminMsg}</div>}
-            <form onSubmit={createInstAdmin} className="space-y-3">
+            <form onSubmit={updateInstAdmin} className="space-y-3">
               <div>
-                <label className="text-xs text-gray-600 font-medium block mb-1">Email</label>
-                <input type="email" required value={adminForm.email} onChange={e => setAdminForm({ ...adminForm, email: e.target.value })}
+                <label className="text-xs text-gray-600 font-medium block mb-1">New Email (leave blank to keep current)</label>
+                <input type="email" value={adminForm.email} onChange={e => setAdminForm({ ...adminForm, email: e.target.value })}
+                  placeholder="new@email.com"
                   className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none" />
               </div>
               <div>
-                <label className="text-xs text-gray-600 font-medium block mb-1">Password</label>
-                <input type="password" required value={adminForm.password} onChange={e => setAdminForm({ ...adminForm, password: e.target.value })}
+                <label className="text-xs text-gray-600 font-medium block mb-1">New Password (leave blank to keep current)</label>
+                <input type="password" value={adminForm.password} onChange={e => setAdminForm({ ...adminForm, password: e.target.value })}
+                  placeholder="••••••••"
                   className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none" />
               </div>
               <div className="flex gap-3 pt-2">
-                <button type="submit" className="flex-1 bg-gray-900 text-white py-2 rounded-lg text-sm font-medium hover:bg-gray-700">Create</button>
+                <button type="submit" className="flex-1 bg-gray-900 text-white py-2 rounded-lg text-sm font-medium hover:bg-gray-700">Update</button>
                 <button type="button" onClick={() => { setShowAdminModal(null); setAdminMsg(''); }}
                   className="flex-1 border border-gray-200 text-gray-700 py-2 rounded-lg text-sm hover:bg-gray-50">Close</button>
               </div>

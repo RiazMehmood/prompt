@@ -183,6 +183,113 @@ async def approve_document(
     return {"message": "Document approved and queued for embedding ingestion"}
 
 
+@router.post("/extract-fields")
+async def extract_fields(
+    current_user: DomainAssignedUser,
+    file: UploadFile = File(...),
+    template_id: str = Form(default=None),
+) -> dict:
+    """Extract slot field values from an uploaded document using OCR + Gemini.
+
+    Accepts a PDF or image file. If `template_id` is provided, the slot
+    definitions from that template are used to guide extraction. Returns
+    ``{extracted_fields: {slot_name: value}, raw_text: str}``.
+    """
+    if file.content_type not in _ALLOWED_MIMES:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type: {file.content_type}")
+
+    contents = await file.read()
+    if len(contents) / (1024 * 1024) > settings.MAX_UPLOAD_SIZE_MB:
+        raise HTTPException(status_code=413, detail="File too large")
+
+    # Save temporarily
+    upload_dir = "./data/uploads/tmp"
+    os.makedirs(upload_dir, exist_ok=True)
+    tmp_path = f"{upload_dir}/{uuid.uuid4()}_{file.filename}"
+    with open(tmp_path, "wb") as f:
+        f.write(contents)
+
+    raw_text = ""
+    try:
+        if file.content_type == "application/pdf":
+            from src.services.documents.text_extraction import TextExtractionService
+            pages = TextExtractionService().extract_pdf(tmp_path)
+            raw_text = "\n\n".join(p["text"] for p in pages if p.get("text"))
+        else:
+            # Image file — run OCR directly
+            from PIL import Image as PILImage
+            from src.services.ocr.orchestrator import OCROrchestrator
+            img = PILImage.open(tmp_path)
+            result = OCROrchestrator().process_image(img, page_num=0, hint_language="english")
+            raw_text = result.text
+    finally:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+
+    if not raw_text.strip():
+        return {"extracted_fields": {}, "raw_text": ""}
+
+    # Load slot definitions from template if provided
+    slot_descs = ""
+    if template_id:
+        try:
+            admin = get_supabase_admin()
+            tpl_resp = admin.table("templates").select("slot_definitions").eq("id", template_id).single().execute()
+            slots = (tpl_resp.data or {}).get("slot_definitions") or []
+            if slots:
+                slot_descs = "\n".join(
+                    f'- "{s["name"]}": {s.get("label") or s["name"].replace("_", " ").title()} ({s.get("type", "text")})'
+                    for s in slots
+                    if s.get("data_source", "user_input") == "user_input"
+                )
+        except Exception:
+            pass
+
+    if not slot_descs:
+        slot_descs = (
+            "- \"accused_name\": Full name of the accused (text)\n"
+            "- \"fir_number\": FIR number (text)\n"
+            "- \"sections\": Sections/charges mentioned (text)\n"
+            "- \"court_name\": Name of the court (text)\n"
+            "- \"applicant_name\": Name of the applicant/lawyer (text)\n"
+            "- \"application_date\": Date of application (date)\n"
+            "- \"police_station\": Police station name (text)"
+        )
+
+    import json as _json
+    import re as _re
+    import google.generativeai as genai
+    from src.config import settings as cfg
+    from src.services.ai.key_rotator import get_key_rotator
+
+    rotator = get_key_rotator()
+    api_key = rotator.get_key()
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel(cfg.GEMINI_MODEL)
+
+    prompt = (
+        f"Extract the following fields from this legal document text.\n\n"
+        f"Document text:\n{raw_text[:4000]}\n\n"
+        f"Fields to extract:\n{slot_descs}\n\n"
+        f"Return a JSON object with these exact keys. Use null for fields not found. "
+        f"For dates, use YYYY-MM-DD format. Return ONLY valid JSON, no explanation."
+    )
+    try:
+        response = model.generate_content(prompt)
+        match = _re.search(r"\{.*\}", response.text, _re.DOTALL)
+        extracted = _json.loads(match.group()) if match else {}
+    except Exception as exc:
+        logger.warning("field_extraction_gemini_failed", error=str(exc))
+        extracted = {}
+
+    # Remove null values
+    extracted_fields = {k: v for k, v in extracted.items() if v is not None}
+    logger.info("fields_extracted", fields=list(extracted_fields.keys()), template_id=template_id)
+    return {"extracted_fields": extracted_fields, "raw_text": raw_text[:2000]}
+
+
 @router.patch("/{doc_id}/reject", status_code=status.HTTP_200_OK)
 async def reject_document(
     doc_id: str,

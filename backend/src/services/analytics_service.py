@@ -173,7 +173,7 @@ class AnalyticsService:
 
         tokens_resp = (
             supabase.table("promotional_tokens")
-            .select("*, domain:domains(name)")
+            .select("*, domain:domains!promotional_tokens_domain_id_fkey(name)")
             .execute()
         )
         tokens = tokens_resp.data or []
@@ -184,8 +184,8 @@ class AnalyticsService:
                 supabase.table("token_usage")
                 .select("id", count="exact")
                 .eq("token_id", token["id"])
-                .gte("used_at", from_date)
-                .lte("used_at", to_date)
+                .gte("redemption_date", from_date)
+                .lte("redemption_date", to_date)
                 .execute()
             )
             period_uses = usage_resp.count or 0

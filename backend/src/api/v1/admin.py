@@ -3,7 +3,10 @@ import shutil
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query
+import csv
+import io
+
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, EmailStr
 
 from src.api.dependencies import AuthenticatedUser, ManageSubsUser, ManageUsersUser, require_admin, require_root_admin
@@ -282,8 +285,13 @@ async def delete_user(
     if not existing.data:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # Delete from profiles (cascades to auth.users due to FK)
+    # Delete from profiles first (avoids FK violations)
     supabase.table("profiles").delete().eq("id", user_id).execute()
+    # Delete from Supabase Auth so the email can be re-used for signup
+    try:
+        supabase.auth.admin.delete_user(user_id)
+    except Exception:
+        pass  # Profile already gone; best-effort auth cleanup
     return {"message": f"User {existing.data['email']} deleted", "user_id": user_id}
 
 
@@ -402,4 +410,79 @@ async def create_user(
         "role": "user",
         "domain_id": body.domain_id,
         "institute_id": body.institute_id,
+    }
+
+
+# ── Bulk User Import ───────────────────────────────────────────────────────────
+
+@router.post("/admin/import-users")
+async def import_users_csv(
+    _admin: AuthenticatedUser = Depends(require_root_admin),
+    file: UploadFile = File(...),
+    domain_id: str = "",
+    institute_id: str = "",
+    subscription_tier: str = "basic",
+):
+    """Bulk-import users from a CSV file.
+
+    CSV must have columns: email, password (optional — default Auto1234! if omitted).
+    Returns counts of created/skipped/failed rows.
+    """
+    import hashlib
+
+    if not file.filename or not file.filename.endswith(".csv"):
+        raise HTTPException(status_code=400, detail="File must be a .csv")
+
+    contents = await file.read()
+    text = contents.decode("utf-8-sig", errors="ignore")
+    reader = csv.DictReader(io.StringIO(text))
+
+    DEFAULT_PASSWORD = "Auto1234!"
+    supabase = get_supabase_admin()
+
+    created, skipped, failed = [], [], []
+
+    for row in reader:
+        email = (row.get("email") or "").strip().lower()
+        if not email:
+            continue
+        password = (row.get("password") or DEFAULT_PASSWORD).strip()
+
+        # Skip existing
+        existing = supabase.table("profiles").select("id").eq("email", email).execute()
+        if existing.data:
+            skipped.append(email)
+            continue
+
+        try:
+            auth_resp = supabase.auth.admin.create_user({
+                "email": email,
+                "password": password,
+                "email_confirm": True,
+            })
+            new_id = auth_resp.user.id
+            profile: dict = {
+                "id": new_id,
+                "email": email,
+                "password_hash": hashlib.sha256(password.encode()).hexdigest(),
+                "role": "user",
+                "subscription_tier": subscription_tier,
+            }
+            if domain_id:
+                profile["domain_id"] = domain_id
+            if institute_id:
+                profile["institute_id"] = institute_id
+
+            supabase.table("profiles").upsert(profile).execute()
+            created.append(email)
+        except Exception as exc:
+            failed.append({"email": email, "error": str(exc)})
+
+    return {
+        "created": len(created),
+        "skipped": len(skipped),
+        "failed": len(failed),
+        "created_emails": created,
+        "skipped_emails": skipped,
+        "failed_details": failed,
     }

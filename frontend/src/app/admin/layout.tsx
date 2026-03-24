@@ -20,6 +20,7 @@ const ICONS: Record<string, string> = {
   tokens:     'M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A2 2 0 013 12V7a4 4 0 014-4z',
   documents:  'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z',
   templates:  'M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z',
+  chat:       'M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z',
   logout:     'M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1',
   chevronL:   'M15 19l-7-7 7-7',
   chevronR:   'M9 5l7 7-7 7',
@@ -34,27 +35,16 @@ const navLinks = [
   { href: '/admin/domains',       label: 'Domains',          icon: 'domains'    },
   { href: '/admin/staff',         label: 'Staff',            icon: 'staff'      },
   { href: '/admin/tokens',        label: 'Promo Tokens',     icon: 'tokens'     },
-  { href: '/admin/documents',     label: 'Documents',        icon: 'documents'  },
-  { href: '/admin/templates',     label: 'Templates',        icon: 'templates'  },
+  { href: '/admin/documents',             label: 'Upload Queue',      icon: 'documents'  },
+  { href: '/admin/generated-documents',   label: 'Generated Docs',    icon: 'templates'  },
+  { href: '/admin/templates',             label: 'Templates',         icon: 'templates'  },
+  { href: '/admin/chat',                  label: 'Test AI Chat',      icon: 'chat'       },
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const router   = useRouter();
   const pathname = usePathname();
-  const [collapsed, setCollapsed] = useState(false);
-
-  // Persist sidebar state
-  useEffect(() => {
-    const saved = localStorage.getItem('sidebar_collapsed');
-    if (saved !== null) setCollapsed(saved === 'true');
-  }, []);
-
-  const toggle = () => {
-    setCollapsed((c) => {
-      localStorage.setItem('sidebar_collapsed', String(!c));
-      return !c;
-    });
-  };
+  const [hovered, setHovered] = useState(false);
 
   useEffect(() => {
     const token = localStorage.getItem('auth_token') ?? localStorage.getItem('admin_token');
@@ -62,30 +52,24 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   }, [router]);
 
   const handleLogout = () => {
-    ['auth_token', 'auth_user', 'admin_token', 'admin_user'].forEach(k => localStorage.removeItem(k));
+    ['auth_token', 'auth_user', 'admin_token', 'admin_user', 'domain_name'].forEach(k => localStorage.removeItem(k));
     router.replace('/landing');
   };
 
   return (
     <div className="flex min-h-screen bg-gray-50">
-      {/* ── Sidebar ─────────────────────────────────────────────────────────── */}
+      {/* ── Sidebar — hover to expand ──────────────────────────────────────── */}
       <aside
-        className={`flex flex-col bg-gray-950 text-white transition-all duration-300 ease-in-out shrink-0 ${
-          collapsed ? 'w-16' : 'w-60'
-        }`}
+        className={`flex flex-col bg-gray-950 text-white transition-all duration-200 ease-in-out shrink-0 overflow-hidden ${hovered ? 'w-60' : 'w-14'}`}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
       >
-        {/* Header / toggle */}
-        <div className={`flex items-center border-b border-gray-800 h-16 ${collapsed ? 'justify-center px-0' : 'justify-between px-5'}`}>
-          {!collapsed && (
-            <span className="text-sm font-bold text-white tracking-wide truncate">Prompt Admin</span>
-          )}
-          <button
-            onClick={toggle}
-            className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-gray-800 transition"
-            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          >
-            <Icon path={collapsed ? ICONS.chevronR : ICONS.chevronL} className="w-4 h-4" />
-          </button>
+        {/* Header */}
+        <div className={`flex items-center border-b border-gray-800 h-16 ${hovered ? 'px-5' : 'justify-center'}`}>
+          {hovered
+            ? <span className="text-sm font-bold text-white tracking-wide truncate">Prompt Admin</span>
+            : <Icon path={ICONS.overview} className="w-5 h-5 text-gray-400" />
+          }
         </div>
 
         {/* Nav links */}
@@ -96,15 +80,13 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               <Link
                 key={link.href}
                 href={link.href}
-                title={collapsed ? link.label : undefined}
+                title={!hovered ? link.label : undefined}
                 className={`flex items-center gap-3 mx-2 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                  active
-                    ? 'bg-gray-700 text-white'
-                    : 'text-gray-400 hover:text-white hover:bg-gray-800'
-                }`}
+                  active ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-800'
+                } ${!hovered ? 'justify-center' : ''}`}
               >
                 <Icon path={ICONS[link.icon]} className="w-5 h-5 shrink-0" />
-                {!collapsed && <span className="truncate">{link.label}</span>}
+                {hovered && <span className="truncate">{link.label}</span>}
               </Link>
             );
           })}
@@ -112,15 +94,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
         {/* Logout */}
         <div className="border-t border-gray-800 p-2">
-          <button
-            onClick={handleLogout}
-            title={collapsed ? 'Sign Out' : undefined}
-            className={`flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm text-gray-400 hover:text-white hover:bg-gray-800 transition ${
-              collapsed ? 'justify-center' : ''
-            }`}
+          <button onClick={handleLogout} title={!hovered ? 'Sign Out' : undefined}
+            className={`flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm text-gray-400 hover:text-white hover:bg-gray-800 transition ${!hovered ? 'justify-center' : ''}`}
           >
             <Icon path={ICONS.logout} className="w-5 h-5 shrink-0" />
-            {!collapsed && <span>Sign Out</span>}
+            {hovered && <span>Sign Out</span>}
           </button>
         </div>
       </aside>

@@ -26,3 +26,7 @@ class ConversationResponse(BaseModel):
     session_id: str
     cached: bool = False
     audio_url: Optional[str] = None  # Populated when client requests voice synthesis (Phase 3)
+    # Document generation — populated when AI generates a document inline
+    document_ready: bool = False
+    document_content: Optional[str] = None
+    document_id: Optional[str] = None

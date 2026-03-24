@@ -74,14 +74,39 @@ async def send_phone_otp(phone: Annotated[str, Body(embed=True)]) -> JSONRespons
 
 @router.get("/me")
 async def get_me(current_user: CurrentUser) -> dict:
-    """Return the authenticated user's profile. Used by the email-verification callback."""
+    """Return the authenticated user's profile."""
     return {
-        "id":                current_user.id,
-        "email":             current_user.email,
-        "role":              current_user.role,
-        "domain_id":         current_user.domain_id,
-        "subscription_tier": current_user.subscription_tier,
+        "id":                   current_user.id,
+        "email":                current_user.email,
+        "role":                 current_user.role,
+        "domain_id":            current_user.domain_id,
+        "domain_name":          current_user.domain_name,
+        "subscription_tier":    current_user.subscription_tier,
+        "professional_details": current_user.professional_details,
     }
+
+
+@router.patch("/profile")
+async def update_profile(
+    body: dict,
+    current_user: CurrentUser,
+) -> dict:
+    """Update the current user's professional details (name, court, bar number, etc.)."""
+    from src.db.supabase_client import get_supabase_admin
+    allowed = {
+        "full_name", "court_name", "bar_number", "designation",
+        "organization", "city", "phone",
+    }
+    details = {k: v for k, v in body.items() if k in allowed and v is not None}
+    if not details:
+        return {"professional_details": current_user.professional_details}
+
+    admin = get_supabase_admin()
+    # Merge with existing details
+    existing = current_user.professional_details or {}
+    merged = {**existing, **details}
+    admin.table("profiles").update({"professional_details": merged}).eq("id", current_user.id).execute()
+    return {"professional_details": merged}
 
 
 @router.post("/refresh", response_model=LoginResponse)

@@ -1,44 +1,100 @@
-"""Conversation router: multilingual text interaction with RAG and Gemini."""
+"""Conversation router: multilingual text interaction with RAG and Gemini.
+
+Two modes:
+1. Document creation mode — guided by DocumentAgentService (intent detected)
+2. Normal RAG chat mode — direct question answering from knowledge base
+"""
 import uuid
 from typing import Annotated
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
 
-from src.api.dependencies import DomainAssignedUser
+from src.api.dependencies import CurrentUser, DomainAssignedUser
 from src.models.conversation import ConversationRequest, ConversationResponse, RagSource
+from src.services.ai.document_agent import DocumentAgentService
 from src.services.ai.semantic_cache import SemanticCacheService
 from src.services.language.detection import LanguageDetectionService
 from src.services.rag.retrieval import RAGRetrievalService
+from src.db.supabase_client import get_supabase_admin
 
 router = APIRouter()
 logger = structlog.get_logger(__name__)
 
 _lang_svc = LanguageDetectionService()
+_doc_agent = DocumentAgentService()
 
 
 @router.post("/conversation", response_model=ConversationResponse)
 async def conversation(
     body: ConversationRequest,
-    current_user: DomainAssignedUser,
+    current_user: CurrentUser,
 ) -> ConversationResponse:
     """Handle a multilingual text query using RAG + Gemini.
 
-    - Auto-detects language if language_hint is not provided
-    - Returns response in the same script as the input
-    - Uses semantic cache to avoid redundant LLM calls
+    Automatically detects document creation intent and routes to the
+    DocumentAgentService for guided, conversational document generation.
+    Otherwise performs normal RAG-based question answering.
     """
     session_id = body.session_id or str(uuid.uuid4())
-    domain_namespace = current_user.domain_namespace or ""
 
-    # Detect language
-    detected_lang = (
-        body.language_hint
-        if body.language_hint
-        else _lang_svc.detect(body.message)
+    # Non-admins must have a domain assigned
+    is_admin = current_user.role in ("root_admin", "domain_admin")
+    if not is_admin and not current_user.domain_id:
+        from fastapi import HTTPException as _HTTPException
+        raise _HTTPException(
+            status_code=403,
+            detail={"code": "NO_DOMAIN", "message": "Please select a domain before accessing this feature"},
+        )
+
+    # Admins may override domain to test any domain's AI
+    effective_domain_id = (body.domain_id if is_admin and body.domain_id else current_user.domain_id)
+
+    # Resolve namespace for the effective domain
+    if is_admin and body.domain_id and body.domain_id != current_user.domain_id:
+        try:
+            admin = get_supabase_admin()
+            d = admin.table("domains").select("knowledge_base_namespace").eq("id", body.domain_id).single().execute()
+            domain_namespace = (d.data or {}).get("knowledge_base_namespace") or body.domain_id
+        except Exception:
+            domain_namespace = body.domain_id
+    else:
+        domain_namespace = current_user.domain_namespace or ""
+
+    # ── Load templates for the effective domain ────────────────────────────────
+    templates = _get_templates(effective_domain_id)
+
+    # ── Try document agent first ──────────────────────────────────────────────
+    domain_name = current_user.domain_name or "General"
+
+    agent_result = await _doc_agent.process(
+        session_id=session_id,
+        message=body.message,
+        domain_namespace=domain_namespace,
+        templates=templates,
+        professional_details=current_user.professional_details,
+        user_id=current_user.id,
+        domain_name=domain_name,
     )
 
-    # Check semantic cache first
+    if agent_result is not None:
+        # Agent handled it — but reply may be None (post-done, fall through to RAG)
+        if agent_result.get("reply") is not None:
+            return ConversationResponse(
+                reply=agent_result["reply"],
+                response_language="english",
+                is_rtl=False,
+                session_id=session_id,
+                document_ready=agent_result.get("document_ready", False),
+                document_content=agent_result.get("document_content"),
+                document_id=agent_result.get("document_id"),
+            )
+
+    # ── Normal RAG chat ───────────────────────────────────────────────────────
+    detected_lang = (
+        body.language_hint if body.language_hint else _lang_svc.detect(body.message)
+    )
+
     cache = SemanticCacheService()
     cached = cache.get(body.message, domain_namespace)
     if cached:
@@ -48,9 +104,12 @@ async def conversation(
             is_rtl=_lang_svc.is_rtl(detected_lang),
             session_id=session_id,
             cached=True,
+            # Carry through document state if agent has a done doc
+            document_ready=agent_result.get("document_ready", False) if agent_result else False,
+            document_content=agent_result.get("document_content") if agent_result else None,
+            document_id=agent_result.get("document_id") if agent_result else None,
         )
 
-    # Retrieve relevant context from knowledge base
     retrieval_svc = RAGRetrievalService()
     chunks = await retrieval_svc.retrieve(
         query=body.message,
@@ -59,20 +118,18 @@ async def conversation(
         language_filter=detected_lang if detected_lang != "mixed" else None,
     )
 
-    # Build prompt context from retrieved chunks
     context_text = "\n\n".join(
         f"[Source {i+1} | confidence: {c['confidence']:.2f}]\n{c['chunk_text']}"
         for i, c in enumerate(chunks)
     )
 
-    # Call Gemini API
     reply = await _generate_reply(
         query=body.message,
         context=context_text,
         language=detected_lang,
+        domain_name=domain_name,
     )
 
-    # Cache the response
     cache.set(body.message, domain_namespace, reply)
 
     sources = [
@@ -84,6 +141,7 @@ async def conversation(
         )
         for c in chunks
     ]
+
     return ConversationResponse(
         reply=reply,
         response_language=detected_lang,
@@ -91,13 +149,31 @@ async def conversation(
         rag_sources=sources,
         session_id=session_id,
         cached=False,
+        document_ready=agent_result.get("document_ready", False) if agent_result else False,
+        document_content=agent_result.get("document_content") if agent_result else None,
+        document_id=agent_result.get("document_id") if agent_result else None,
     )
 
 
-async def _generate_reply(query: str, context: str, language: str) -> str:
-    """Generate a reply using Gemini API with domain context."""
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _get_templates(domain_id: str | None) -> list[dict]:
+    """Fetch templates for the user's domain."""
+    if not domain_id:
+        return []
+    try:
+        admin = get_supabase_admin()
+        resp = admin.table("templates").select("*").eq("domain_id", domain_id).execute()
+        return resp.data or []
+    except Exception:
+        return []
+
+
+async def _generate_reply(query: str, context: str, language: str, domain_name: str = "General") -> str:
+    """Generate a reply using Gemini with RAG context."""
     from src.services.ai.key_rotator import get_key_rotator
     import google.generativeai as genai
+    from src.config import settings
 
     rotator = get_key_rotator()
     api_key = rotator.get_key()
@@ -109,17 +185,17 @@ async def _generate_reply(query: str, context: str, language: str) -> str:
     }.get(language, "Respond in English.")
 
     prompt = (
-        f"You are a professional domain expert assistant. "
-        f"Answer ONLY based on the provided context. "
-        f"If the answer cannot be found in the context, say so. "
-        f"Do not generate information not present in the context.\n\n"
+        f"You are a professional {domain_name} domain expert assistant. "
+        f"Only answer questions relevant to {domain_name}. "
+        f"Answer based on the provided context. "
+        f"If the answer cannot be found in the context, provide a helpful general answer "
+        f"within the {domain_name} domain, but note that it is not from the knowledge base.\n\n"
         f"CONTEXT:\n{context}\n\n"
         f"QUESTION: {query}\n\n"
         f"{lang_instruction}"
     )
 
     try:
-        from src.config import settings
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel(settings.GEMINI_MODEL)
         response = model.generate_content(prompt)

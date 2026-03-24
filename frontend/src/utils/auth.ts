@@ -24,13 +24,14 @@ export function logout() {
   localStorage.removeItem('auth_user');
   localStorage.removeItem('admin_token');
   localStorage.removeItem('admin_user');
+  localStorage.removeItem('domain_name');
 }
 
 export function roleHomePath(role: string): string {
   switch (role) {
     case 'root_admin':   return '/admin/analytics';
     case 'domain_admin': return '/domain-admin';
-    case 'institute_admin': return '/institute-admin';
+    case 'institute_admin': return '/institute/dashboard';
     case 'staff':        return '/staff';
     case 'user':         return '/user';
     default:             return '/login';
@@ -56,6 +57,15 @@ export async function apiFetch<T>(path: string, options?: RequestInit): Promise<
     },
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data?.error?.message ?? data?.detail ?? 'Request failed');
+  if (!res.ok) {
+    const detail = data?.detail;
+    const msg =
+      typeof detail === 'string' ? detail :
+      typeof detail === 'object' && detail !== null ? (detail.message ?? JSON.stringify(detail)) :
+      data?.error?.message ?? 'Request failed';
+    const err = new Error(msg) as Error & { status: number };
+    err.status = res.status;
+    throw err;
+  }
   return data as T;
 }

@@ -172,7 +172,7 @@ class TokenService:
         supabase = get_supabase_admin()
         resp = (
             supabase.table("promotional_tokens")
-            .select("*, domain:domains(name)")
+            .select("*, domain:domains!promotional_tokens_domain_id_fkey(name)")
             .order("created_at", desc=True)
             .execute()
         )

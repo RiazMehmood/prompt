@@ -33,10 +33,20 @@ class EmailAuthService:
 
     async def register(self, email: str, password: str, redirect_to: str = "") -> dict:
         """Register a new user via Supabase Auth (sends verification email)."""
-        # Check if email is already registered
+        # Check profiles table first
         existing = self._admin.table("profiles").select("id").eq("email", email).execute()
         if existing.data:
             raise ValueError("An account with this email already exists. Please sign in.")
+        # Also check Supabase Auth (covers deleted-profile but retained auth user)
+        try:
+            auth_users = self._admin.auth.admin.list_users()
+            for u in (auth_users or []):
+                if getattr(u, "email", None) == email:
+                    # Auth user exists without a profile — delete stale auth entry so re-signup works
+                    self._admin.auth.admin.delete_user(u.id)
+                    break
+        except Exception:
+            pass  # Non-fatal: Supabase auth list unavailable
 
         try:
             signup_opts: dict = {"email": email, "password": password}
@@ -45,7 +55,30 @@ class EmailAuthService:
             response = self._client.auth.sign_up(signup_opts)
             if response.user is None:
                 raise ValueError("Registration failed — no user returned")
+
+            # Create profile row immediately (no DB trigger exists for this)
+            try:
+                self._admin.table("profiles").insert({
+                    "id": response.user.id,
+                    "email": email,
+                    "role": "user",
+                    "subscription_tier": "free_trial",
+                    "password_hash": "",
+                }).execute()
+            except Exception as profile_exc:
+                # Profile may already exist (race condition) — non-fatal
+                logger.warning("profile_create_skipped", error=str(profile_exc))
+
             logger.info("user_registered", email=email[:3] + "***")
+            # When email confirmation is disabled, Supabase returns a session immediately
+            if response.session:
+                return {
+                    "message": "Account created",
+                    "user_id": response.user.id,
+                    "access_token": response.session.access_token,
+                    "refresh_token": response.session.refresh_token,
+                    "token_type": "bearer",
+                }
             return {"message": "Verification email sent", "user_id": response.user.id}
         except ValueError:
             raise

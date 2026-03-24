@@ -27,7 +27,22 @@ export default function SignupPage() {
         body: JSON.stringify({ email: form.email, password: form.password }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data?.error?.message ?? 'Registration failed');
+      if (!res.ok) throw new Error(data?.error?.message ?? data?.detail ?? 'Registration failed');
+      // Email confirmation disabled → Supabase returns tokens immediately
+      if (data.access_token) {
+        localStorage.setItem('auth_token', data.access_token);
+        localStorage.setItem('admin_token', data.access_token);
+        if (data.refresh_token) localStorage.setItem('refresh_token', data.refresh_token);
+        // Fetch profile then go to onboarding
+        const profileRes = await fetch(`${API_BASE}/auth/me`, {
+          headers: { Authorization: `Bearer ${data.access_token}` },
+        });
+        const profile = await profileRes.json();
+        localStorage.setItem('auth_user', JSON.stringify(profile));
+        localStorage.setItem('admin_user', JSON.stringify(profile));
+        router.replace('/onboarding');
+        return;
+      }
       setUserId(data.user_id ?? '');
       setStep('verify');
     } catch (err: any) {

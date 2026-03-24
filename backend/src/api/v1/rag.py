@@ -7,7 +7,7 @@ import structlog
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response, status
 from fastapi.responses import StreamingResponse
 
-from src.api.dependencies import DomainAssignedUser
+from src.api.dependencies import CurrentUser, DomainAdminUser, DomainAssignedUser
 from src.models.generated_document import (
     DocumentDetail,
     GenerateRequest,
@@ -103,6 +103,49 @@ async def generate_document(
     return GenerateResponse(id=doc_id, status="pending", message="Document generation started")
 
 
+@router.get("/generate", response_model=list[dict])
+async def list_generated_documents(
+    current_user: DomainAdminUser,
+    domain_id: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[dict]:
+    """List generated documents for admin review."""
+    admin = get_supabase_admin()
+    query = (
+        admin.table("generated_documents")
+        .select(
+            "id, user_id, template_id, domain_id, output_language, output_format, "
+            "validation_status, created_at, input_parameters, "
+            "profiles!generated_documents_user_id_fkey(email), "
+            "templates(name), "
+            "domains(name)"
+        )
+        .order("created_at", desc=True)
+        .range(offset, offset + limit - 1)
+    )
+    if domain_id:
+        query = query.eq("domain_id", domain_id)
+    elif current_user.role == "domain_admin" and current_user.domain_id:
+        query = query.eq("domain_id", current_user.domain_id)
+
+    result = query.execute()
+    rows = result.data or []
+
+    return [
+        {
+            "id": r["id"],
+            "user_email": (r.get("profiles") or {}).get("email", "—"),
+            "template_name": (r.get("templates") or {}).get("name", "—"),
+            "domain_name": (r.get("domains") or {}).get("name", "—"),
+            "validation_status": r["validation_status"],
+            "output_language": r["output_language"],
+            "created_at": r["created_at"],
+        }
+        for r in rows
+    ]
+
+
 @router.get("/generate/{doc_id}", response_model=DocumentDetail)
 async def get_generated_document(
     doc_id: str,
@@ -137,16 +180,18 @@ async def get_generated_document(
 async def export_document(
     doc_id: str,
     format: str,
-    current_user: DomainAssignedUser,
+    current_user: CurrentUser,
 ) -> Response:
     """Export a generated document as PDF or DOCX."""
     if format not in ("pdf", "docx"):
         raise HTTPException(status_code=400, detail="format must be 'pdf' or 'docx'")
 
     admin = get_supabase_admin()
-    result = admin.table("generated_documents").select("*").eq("id", doc_id).eq(
-        "user_id", current_user.id
-    ).single().execute()
+    is_admin = current_user.role in ("root_admin", "domain_admin")
+    query = admin.table("generated_documents").select("*").eq("id", doc_id)
+    if not is_admin:
+        query = query.eq("user_id", current_user.id)
+    result = query.single().execute()
     if not result.data or result.data.get("validation_status") != "valid":
         raise HTTPException(status_code=404, detail="Document not found or not yet valid")
 

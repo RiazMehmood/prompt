@@ -1,12 +1,14 @@
-"""Templates API router — list and retrieve domain-specific document templates."""
+"""Templates API router — list, retrieve, and update domain-specific document templates."""
+import os
+import uuid
 from datetime import datetime
 from typing import Annotated, Any, Dict, List, Optional
 
 import structlog
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
-from src.api.dependencies import CurrentUser
+from src.api.dependencies import CurrentUser, ManageTemplatesUser, require_root_admin
 from src.db.supabase_client import get_supabase_admin
 
 router = APIRouter()
@@ -82,3 +84,98 @@ async def get_template(
         raise HTTPException(status_code=404, detail="Template not found")
 
     return TemplateResponse(**result.data)
+
+
+class SlotUpdate(BaseModel):
+    name: str
+    type: str
+    required: bool
+    data_source: str          # user_input | rag_retrieval | auto
+    rag_query_hint: Optional[str] = None   # custom RAG query for this slot
+    label: Optional[str] = None           # display label shown to user
+
+
+class TemplateUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    content: Optional[str] = None
+    is_active: Optional[bool] = None
+    slot_definitions: Optional[List[Dict[str, Any]]] = None
+
+
+@router.patch("/{template_id}", response_model=TemplateResponse)
+async def update_template(
+    template_id: str,
+    body: TemplateUpdate,
+    _: ManageTemplatesUser,
+) -> TemplateResponse:
+    """Update a template's slots, content, or active status (root_admin only)."""
+    admin = get_supabase_admin()
+
+    # Verify exists
+    existing = admin.table("templates").select("id, domain_id").eq("id", template_id).single().execute()
+    if not existing.data:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    result = (
+        admin.table("templates")
+        .update(updates)
+        .eq("id", template_id)
+        .execute()
+    )
+    if not result.data:
+        raise HTTPException(status_code=500, detail="Update failed")
+
+    # Return full updated template
+    full = (
+        admin.table("templates")
+        .select("id, name, domain_id, description, content, slot_definitions, formatting_rules, version, is_active, created_at")
+        .eq("id", template_id)
+        .single()
+        .execute()
+    )
+    return TemplateResponse(**full.data)
+
+
+@router.post("/{template_id}/sample")
+async def upload_sample(
+    template_id: str,
+    _: ManageTemplatesUser,
+    file: UploadFile = File(...),
+) -> dict:
+    """Upload a sample/reference document for a template (root_admin only).
+
+    The file is stored on disk and its path is recorded in the template's
+    ``formatting_rules`` JSON under the key ``sample_file_path``.
+    """
+    admin = get_supabase_admin()
+
+    # Verify template exists
+    existing = admin.table("templates").select("id, formatting_rules").eq("id", template_id).single().execute()
+    if not existing.data:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    _SAMPLE_ALLOWED = {"application/pdf", "image/jpeg", "image/png"}
+    if file.content_type not in _SAMPLE_ALLOWED:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type: {file.content_type}")
+
+    contents = await file.read()
+    sample_dir = "./data/uploads/samples"
+    os.makedirs(sample_dir, exist_ok=True)
+    file_id = str(uuid.uuid4())
+    file_path = f"{sample_dir}/{file_id}_{file.filename}"
+    with open(file_path, "wb") as f:
+        f.write(contents)
+
+    # Merge into existing formatting_rules
+    rules = existing.data.get("formatting_rules") or {}
+    rules["sample_file_path"] = file_path
+    rules["sample_filename"] = file.filename
+
+    admin.table("templates").update({"formatting_rules": rules}).eq("id", template_id).execute()
+    logger.info("sample_uploaded", template_id=template_id, filename=file.filename)
+    return {"message": "Sample uploaded", "sample_filename": file.filename}

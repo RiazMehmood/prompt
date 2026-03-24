@@ -13,6 +13,9 @@ logger = structlog.get_logger(__name__)
 class AuthenticatedUser(UserProfile):
     """Extends UserProfile with request-scoped context from JWT."""
     domain_namespace: Optional[str] = None
+    domain_name: Optional[str] = None
+    professional_details: dict = {}
+    institute_id: Optional[str] = None
 
 
 async def get_current_user(
@@ -58,26 +61,40 @@ async def get_current_user(
     # Load profile from DB to get domain_id, role, etc.
     try:
         result = admin.table("profiles").select(
-            "id, email, phone, domain_id, subscription_tier, role, "
-            "document_generation_count, upload_count, created_at, last_login_at"
+            "id, email, phone, domain_id, institute_id, subscription_tier, role, "
+            "document_generation_count, upload_count, created_at, last_login_at, professional_details"
         ).eq("id", user_id).single().execute()
-    except Exception as exc:
-        logger.error("profile_load_failed", user_id=user_id, error=str(exc))
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"code": "PROFILE_NOT_FOUND", "message": "User profile not found"},
-        ) from exc
+        data = result.data or {}
+    except Exception:
+        # Profile missing — auto-create it (handles race condition on new signup)
+        auth_user = admin.auth.admin.get_user_by_id(user_id)
+        user_email = auth_user.user.email if auth_user and auth_user.user else None
+        try:
+            created = admin.table("profiles").insert({
+                "id": user_id,
+                "email": user_email,
+                "role": "user",
+                "subscription_tier": "free_trial",
+                "password_hash": "",
+            }).execute()
+            data = created.data[0] if created.data else {"id": user_id, "email": user_email, "role": "user"}
+        except Exception as exc2:
+            logger.error("profile_load_failed", user_id=user_id, error=str(exc2))
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={"code": "PROFILE_NOT_FOUND", "message": "User profile not found"},
+            ) from exc2
 
-    data = result.data or {}
-
-    # Load domain namespace for vector isolation
+    # Load domain namespace and name for vector isolation + prompt context
     domain_namespace: Optional[str] = None
+    domain_name: Optional[str] = None
     if data.get("domain_id"):
-        domain_result = admin.table("domains").select("knowledge_base_namespace").eq(
+        domain_result = admin.table("domains").select("knowledge_base_namespace, name").eq(
             "id", data["domain_id"]
         ).single().execute()
         if domain_result.data:
             domain_namespace = domain_result.data.get("knowledge_base_namespace")
+            domain_name = domain_result.data.get("name")
 
     structlog.contextvars.bind_contextvars(
         domain_id=data.get("domain_id"),
@@ -96,6 +113,9 @@ async def get_current_user(
         created_at=data.get("created_at"),
         last_login_at=data.get("last_login_at"),
         domain_namespace=domain_namespace,
+        domain_name=domain_name,
+        professional_details=data.get("professional_details") or {},
+        institute_id=data.get("institute_id"),
     )
 
 

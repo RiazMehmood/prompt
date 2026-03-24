@@ -23,6 +23,8 @@ export const ICONS: Record<string, string> = {
   credit:     'M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z',
   shield:     'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z',
   globe:      'M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9',
+  folder:     'M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z',
+  generate:   'M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z',
   logout:     'M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1',
   chevronL:   'M15 19l-7-7 7-7',
   chevronR:   'M9 5l7 7-7 7',
@@ -53,7 +55,7 @@ export default function DashboardShell({
 }: DashboardShellProps) {
   const router   = useRouter();
   const pathname = usePathname();
-  const [collapsed, setCollapsed] = useState(false);
+  const [hovered, setHovered] = useState(false);
   const [user, setUser] = useState<AuthUser | null>(null);
 
   useEffect(() => {
@@ -64,18 +66,6 @@ export default function DashboardShell({
     setUser(u);
   }, [router]);
 
-  useEffect(() => {
-    const saved = localStorage.getItem(`sidebar_${title}`);
-    if (saved !== null) setCollapsed(saved === 'true');
-  }, [title]);
-
-  const toggle = () => {
-    setCollapsed(c => {
-      localStorage.setItem(`sidebar_${title}`, String(!c));
-      return !c;
-    });
-  };
-
   const handleLogout = () => {
     logout();
     router.replace('/landing');
@@ -83,18 +73,20 @@ export default function DashboardShell({
 
   return (
     <div className="flex min-h-screen bg-gray-50">
-      {/* Sidebar */}
-      <aside className={`flex flex-col bg-gray-950 text-white shrink-0 transition-all duration-300 ease-in-out ${collapsed ? 'w-16' : 'w-60'}`}>
+      {/* Sidebar — hover to expand */}
+      <aside
+        className={`flex flex-col bg-gray-950 text-white shrink-0 transition-all duration-200 ease-in-out overflow-hidden ${hovered ? 'w-60' : 'w-14'}`}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+      >
         {/* Header */}
-        <div className={`flex items-center border-b border-gray-800 h-16 ${collapsed ? 'justify-center' : 'justify-between px-5'}`}>
-          {!collapsed && <span className="text-sm font-bold text-white truncate">{title}</span>}
-          <button onClick={toggle} className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-gray-800 transition">
-            <Icon d={collapsed ? ICONS.chevronR : ICONS.chevronL} className="w-4 h-4" />
-          </button>
+        <div className={`flex items-center border-b border-gray-800 h-16 ${hovered ? 'justify-between px-5' : 'justify-center'}`}>
+          {hovered && <span className="text-sm font-bold text-white truncate">{title}</span>}
+          {!hovered && <Icon d={ICONS.home} className="w-5 h-5 text-gray-400" />}
         </div>
 
         {/* User chip */}
-        {!collapsed && user && (
+        {hovered && user && (
           <div className="mx-3 mt-3 px-3 py-2 bg-gray-800 rounded-xl">
             <p className="text-xs text-gray-400 truncate">{user.email}</p>
             <span className="inline-block mt-0.5 text-xs font-semibold text-indigo-300 bg-indigo-900/50 px-1.5 py-0.5 rounded-full">
@@ -111,13 +103,13 @@ export default function DashboardShell({
               <Link
                 key={link.href}
                 href={link.href}
-                title={collapsed ? link.label : undefined}
+                title={!hovered ? link.label : undefined}
                 className={`flex items-center gap-3 mx-2 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
                   active ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-800'
-                }`}
+                } ${!hovered ? 'justify-center' : ''}`}
               >
                 <Icon d={ICONS[link.icon] ?? ICONS.home} className="w-5 h-5 shrink-0" />
-                {!collapsed && <span className="truncate">{link.label}</span>}
+                {hovered && <span className="truncate">{link.label}</span>}
               </Link>
             );
           })}
@@ -127,11 +119,11 @@ export default function DashboardShell({
         <div className="border-t border-gray-800 p-2">
           <button
             onClick={handleLogout}
-            title={collapsed ? 'Sign Out' : undefined}
-            className={`flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm text-gray-400 hover:text-white hover:bg-gray-800 transition ${collapsed ? 'justify-center' : ''}`}
+            title={!hovered ? 'Sign Out' : undefined}
+            className={`flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm text-gray-400 hover:text-white hover:bg-gray-800 transition ${!hovered ? 'justify-center' : ''}`}
           >
             <Icon d={ICONS.logout} className="w-5 h-5 shrink-0" />
-            {!collapsed && <span>Sign Out</span>}
+            {hovered && <span>Sign Out</span>}
           </button>
         </div>
       </aside>

@@ -7,16 +7,20 @@ from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
 class SubscriptionTier(str, Enum):
+    free_trial = "free_trial"
     basic = "basic"
     pro = "pro"
     premium = "premium"
     institutional = "institutional"
+    standard = "standard"
 
 
 class UserRole(str, Enum):
     user = "user"
     domain_admin = "domain_admin"
     root_admin = "root_admin"
+    staff = "staff"
+    institute_admin = "institute_admin"
 
 
 # ============================================================

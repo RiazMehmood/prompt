@@ -37,6 +37,17 @@ interface Tier {
   highlight: boolean;
 }
 
+interface TokenPreview {
+  valid: boolean;
+  code: string;
+  discount_type: string;
+  discount_value: number;
+  description?: string;
+  error?: string;
+  already_used?: boolean;
+  remaining_uses?: number;
+}
+
 const TIER_ICONS: Record<string, string> = {
   free_trial: '🌱', basic: '🌱', pro: '🚀', premium: '⭐', institutional: '🏢',
 };
@@ -61,6 +72,119 @@ function UsageMeter({ label, used, max }: { label: string; used: number; max: nu
       <div className="w-full bg-gray-100 rounded-full h-2">
         <div className={`h-2 rounded-full ${bar} transition-all`} style={{ width: `${pct}%` }} />
       </div>
+    </div>
+  );
+}
+
+function PromoCodeBox() {
+  const [code, setCode]           = useState('');
+  const [preview, setPreview]     = useState<TokenPreview | null>(null);
+  const [validating, setValidating] = useState(false);
+  const [applying, setApplying]   = useState(false);
+  const [applied, setApplied]     = useState(false);
+  const [error, setError]         = useState('');
+
+  const validate = async () => {
+    if (!code.trim()) return;
+    setValidating(true);
+    setError('');
+    setPreview(null);
+    try {
+      const result = await apiFetch<TokenPreview>('/tokens/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: code.trim().toUpperCase() }),
+      });
+      setPreview(result);
+    } catch (e: any) {
+      setError(e.message ?? 'Invalid promo code');
+    } finally {
+      setValidating(false);
+    }
+  };
+
+  const apply = async () => {
+    if (!preview?.valid) return;
+    setApplying(true);
+    setError('');
+    try {
+      await apiFetch('/tokens/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: code.trim().toUpperCase() }),
+      });
+      setApplied(true);
+    } catch (e: any) {
+      setError(e.message ?? 'Failed to apply code');
+    } finally {
+      setApplying(false);
+    }
+  };
+
+  if (applied) {
+    return (
+      <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 flex items-center gap-3">
+        <span className="text-2xl">✅</span>
+        <div>
+          <p className="font-semibold text-emerald-800 text-sm">Promo code applied!</p>
+          <p className="text-emerald-700 text-xs">{preview?.description}</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-white border border-gray-100 rounded-2xl p-5">
+      <h3 className="font-semibold text-gray-900 text-sm mb-3">Have a promo code?</h3>
+      <div className="flex gap-2 mb-3">
+        <input
+          value={code}
+          onChange={e => { setCode(e.target.value.toUpperCase()); setPreview(null); setError(''); }}
+          onKeyDown={e => e.key === 'Enter' && validate()}
+          placeholder="e.g. LEGAL30"
+          className="flex-1 border border-gray-300 rounded-xl px-4 py-2.5 text-sm font-mono uppercase focus:outline-none focus:ring-2 focus:ring-gray-900 transition"
+        />
+        <button
+          onClick={validate}
+          disabled={!code.trim() || validating}
+          className="px-4 py-2.5 bg-gray-900 text-white rounded-xl text-sm font-medium disabled:opacity-40 hover:bg-gray-700 transition"
+        >
+          {validating ? '…' : 'Check'}
+        </button>
+      </div>
+
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-3 py-2 text-xs mb-3">{error}</div>
+      )}
+
+      {preview && (
+        <div className={`rounded-xl p-3 mb-3 flex items-start gap-3 ${preview.valid ? 'bg-emerald-50 border border-emerald-200' : 'bg-red-50 border border-red-200'}`}>
+          <span className="text-xl">{preview.valid ? '🎉' : '❌'}</span>
+          <div className="flex-1">
+            <p className={`text-sm font-semibold ${preview.valid ? 'text-emerald-800' : 'text-red-700'}`}>
+              {preview.valid ? (preview.description || 'Code is valid!') : (preview.error ?? 'Code not valid')}
+            </p>
+            {preview.valid && (
+              <p className="text-xs text-emerald-600 mt-0.5">
+                {preview.discount_type === 'percentage' && `${preview.discount_value}% discount`}
+                {preview.discount_type === 'flat_pkr' && `PKR ${preview.discount_value} off`}
+                {preview.discount_type === 'free_tier_upgrade' && `${preview.discount_value} day(s) free upgrade`}
+                {preview.remaining_uses != null && ` · ${preview.remaining_uses} uses remaining`}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {preview?.valid && (
+        <button
+          onClick={apply}
+          disabled={applying}
+          className="w-full py-2.5 bg-emerald-600 text-white rounded-xl text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 transition"
+        >
+          {applying ? 'Applying…' : 'Apply Code'}
+        </button>
+      )}
     </div>
   );
 }
@@ -94,7 +218,7 @@ export default function UserBillingPage() {
 
       {/* Current plan */}
       {sub && (
-        <div className={`rounded-2xl border p-6 mb-8 ${col.bg} ${col.border}`}>
+        <div className={`rounded-2xl border p-6 mb-6 ${col.bg} ${col.border}`}>
           <div className="flex items-start justify-between mb-5">
             <div>
               <div className="flex items-center gap-2 mb-1">
@@ -132,6 +256,11 @@ export default function UserBillingPage() {
           </div>
         </div>
       )}
+
+      {/* Promo code */}
+      <div className="mb-8">
+        <PromoCodeBox />
+      </div>
 
       {/* Plan comparison */}
       <h2 className="text-lg font-semibold text-gray-900 mb-4">All Plans</h2>
