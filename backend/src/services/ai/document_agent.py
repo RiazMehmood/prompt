@@ -376,9 +376,9 @@ class DocumentAgentService:
         return {
             "reply": (
                 f"I have all the case details. Here's a summary:\n\n{summary}\n\n"
-                f"I'll now search our {state.get('domain_name', 'domain')} knowledge base to find relevant information. "
-                f"Type **'generate'** to proceed, or let me know "
-                f"if any details above need correction."
+                f"**Review the details above** — you can correct any field now "
+                f"(e.g. *'change bar council to Karachi Bar'*) or type **'generate'** to proceed.\n"
+                f"You can also make changes after the document is generated."
             ),
             "document_ready": False,
         }
@@ -493,7 +493,8 @@ class DocumentAgentService:
                 f"What would you like to do?\n"
                 f"• Type **'download pdf'** to export as PDF\n"
                 f"• Type **'download docx'** to export as Word document\n"
-                f"• Ask me anything else or say **'new document'** to start again"
+                f"• Tell me any field to change (e.g. *'change surety amount to 5 lac'*) and I'll regenerate\n"
+                f"• Say **'new document'** to start a new one"
             ),
             "document_ready": True,
             "document_content": content,
@@ -526,6 +527,28 @@ class DocumentAgentService:
                 "document_content": state.get("document_content", ""),
                 "document_id": state.get("document_id"),
             }
+
+        # ── Revision: user wants to change a field after document is generated ──
+        # Try to extract any slot values from the message
+        all_slots = state.get("user_slots", []) + [
+            {"name": k} for k in state.get("collected", {})
+        ]
+        corrected = await self._extract_slots(message, all_slots)
+        corrected = await self._disambiguate_persons({**state["collected"], **corrected}, message)
+        corrected_filled = {k: v for k, v in corrected.items() if v}
+        if corrected_filled:
+            state["collected"].update(corrected_filled)
+            labels = [_to_label(k) for k in corrected_filled]
+            # Regenerate the document with updated fields
+            domain_namespace = state.get("domain_namespace", "")
+            result = await self._generate_document(session_id, state, domain_namespace)
+            result["reply"] = (
+                f"Updated **{', '.join(labels)}** and regenerated the document.\n\n"
+                f"• Type **'download pdf'** or **'download docx'** to export\n"
+                f"• Tell me any other changes needed"
+            )
+            return result
+
         # Normal chat — still show document
         return {
             "reply": None,  # signal to fall through to normal RAG chat
